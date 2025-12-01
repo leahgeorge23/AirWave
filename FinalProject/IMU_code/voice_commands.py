@@ -17,7 +17,7 @@ def map_command(text: str):
     if "next" in t or "skip" in t:
         return "NEXT_TRACK"
 
-    if "previous" in t or "back" in t or "prior" in t:
+    if "previous" in t or "back" in t or "prior" in t or "last" in t:
         return "PREV_TRACK"
 
     if "pause" in t or "stop" in t:
@@ -25,6 +25,12 @@ def map_command(text: str):
 
     if "resume" in t or ("play" in t and "playlist" not in t):
         return "PLAY"
+
+    if "volume up" in t or "turn up" in t or "louder" in t:
+        return "VOL_UP"
+
+    if "volume down" in t or "turn down" in t or "quieter" in t:
+        return "VOL_DOWN"
 
     return None
 
