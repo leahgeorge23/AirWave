@@ -26,10 +26,10 @@ def map_command(text: str):
     if "resume" in t or ("play" in t and "playlist" not in t):
         return "PLAY"
 
-    if "volume up" in t or "turn up" in t or "louder" in t:
+    if "volume up" in t or "turn up" in t or "louder" in t or "higher" in t:
         return "VOL_UP"
 
-    if "volume down" in t or "turn down" in t or "quieter" in t:
+    if "volume down" in t or "turn down" in t or "quieter" in t or "softer" in t:
         return "VOL_DOWN"
 
     return None
