@@ -1,3 +1,7 @@
+# requires installation of:
+#   sudo apt install portaudio19-dev flac pocketsphinx python3-pocketsphinx python3-pyaudio
+#   pip3 install SpeechRecognition
+
 import speech_recognition as sr
 import time
 
