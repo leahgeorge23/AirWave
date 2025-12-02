@@ -11,16 +11,27 @@ MPU6050_ADDR = 0x68   # I2C address from i2cdetect
 # How many samples to average at startup to establish baseline each cycle
 BASELINE_SAMPLES = 100
 
-# Gesture thresholds (relative to baseline)
-SWIPE_DELTA_THRESHOLD = 6000    # |ay - baseline_ay| for swipe
-TWIST_DELTA_THRESHOLD = 8000    # |gz - baseline_gz| for twist
+# ---- Gesture thresholds (relative to baseline) ----
+# We found from your data:
+#   - Swipes: big |dgz|, small/moderate |gx|
+#   - Twists: HUGE |gx| (often saturating), plus noticeable |dy|
 
-# Limits to separate gestures (to avoid mislabeling)
-AY_DURING_TWIST_LIMIT = 4000    # |dy| must be < this for twist
-GZ_DURING_SWIPE_LIMIT = 6000    # |dgz| must be < this for swipe
+# Minimum motion to even consider it (any axis)
+MOTION_START_THRESHOLD = 1000    # min(|dy| or |dgz| or |gx|)
+
+# A swipe is mostly rotation about Z:
+SWIPE_GZ_THRESHOLD = 1800        # |gz - baseline_gz| for swipe
+
+# A twist is mostly large rotation on X (gx):
+GX_TWIST_THRESHOLD = 8000        # |gx| must exceed this to call it a twist
+TWIST_AY_THRESHOLD = 1500        # |dy| should be at least this so it's not just noise
+
+# Safety limits (quite generous)
+AY_DURING_SWIPE_LIMIT = 20000    # allow plenty of ay during swipes
+GZ_DURING_TWIST_LIMIT = 30000    # ignore insane gz when calling twist
 
 # Time to wait after a gesture before starting the next calibration (seconds)
-GESTURE_COOLDOWN = 1.0
+GESTURE_COOLDOWN = 0.8
 
 # -------------------------
 # MPU6050 REGISTERS
@@ -56,7 +67,6 @@ def calibrate_baseline(bus):
 
     sum_ay = 0
     sum_gz = 0
-
     for i in range(BASELINE_SAMPLES):
         ay = read_word(bus, ACCEL_XOUT_H + 2)
         gz = read_word(bus, GYRO_XOUT_H + 4)
@@ -74,13 +84,30 @@ def calibrate_baseline(bus):
 def detect_single_gesture(bus, baseline_ay, baseline_gz):
     """
     Wait for exactly ONE gesture, then return its label.
+       Final logic:
+
+      1) Ignore small motion (all |dy|, |dgz|, |gx| below MOTION_START_THRESHOLD).
+
+      2) Prefer classifying as a TWIST if:
+           - |gx| > GX_TWIST_THRESHOLD
+           - |dy| > TWIST_AY_THRESHOLD
+           - |dgz| not insane
+         Direction from gx:
+           - gx < 0 => TWIST_RIGHT
+           - gx > 0 => TWIST_LEFT
+
+      3) If not a twist, classify as SWIPE if:
+           - |dgz| > SWIPE_GZ_THRESHOLD
+           - |dy| < AY_DURING_SWIPE_LIMIT
+         Direction from dgz:
+           - dgz > 0 => SWIPE_UP
+           - dgz < 0 => SWIPE_DOWN
     """
     print("\nSTEP 2: You may now make ONE gesture.")
     print("  -> Valid gestures: TWIST_RIGHT, TWIST_LEFT, SWIPE_UP, SWIPE_DOWN")
     print("  -> Perform ONE clear gesture now...")
 
     gesture = None
-
     while gesture is None:
         # Read current values
         ax = read_word(bus, ACCEL_XOUT_H)
@@ -91,32 +118,51 @@ def detect_single_gesture(bus, baseline_ay, baseline_gz):
         gy = read_word(bus, GYRO_XOUT_H + 2)
         gz = read_word(bus, GYRO_XOUT_H + 4)
 
-        # Relative to baseline
+        # Relative to baseline for ay, gz
         dy = ay - baseline_ay
         dgz = gz - baseline_gz
 
-        # --- First try to detect a SWIPE (based on dy) ---
-        if abs(dy) > SWIPE_DELTA_THRESHOLD and abs(dgz) < GZ_DURING_SWIPE_LIMIT:
-            if dy > 0:
-                gesture = "SWIPE_UP"
-            else:
-                gesture = "SWIPE_DOWN"
+        abs_dy = abs(dy)
+        abs_dgz = abs(dgz)
+        abs_gx = abs(gx)
 
-        # --- If no swipe, try to detect a TWIST (based on dgz) ---
-        # Note: mapping so that physical right = TWIST_RIGHT for your setup
-        if gesture is None and abs(dgz) > TWIST_DELTA_THRESHOLD and abs(dy) < AY_DURING_TWIST_LIMIT:
-            if dgz < 0:
+        # Ignore very small movement
+        if (
+            abs_dy < MOTION_START_THRESHOLD
+            and abs_dgz < MOTION_START_THRESHOLD
+            and abs_gx < MOTION_START_THRESHOLD
+        ):
+            time.sleep(0.01)
+            continue
+
+        # --- 1) Try TWIST first (gx-dominated) ---
+        if (
+            abs_gx > GX_TWIST_THRESHOLD
+            and abs_dy > TWIST_AY_THRESHOLD
+            and abs_dgz < GZ_DURING_TWIST_LIMIT
+        ):
+            if gx < 0:
                 gesture = "TWIST_RIGHT"
             else:
                 gesture = "TWIST_LEFT"
 
-        # Uncomment for debugging values:
-        # print(f"ay={ay} dy={dy} | gz={gz} dgz={dgz}")
+        # --- 2) If no twist, try SWIPE (gz-dominated) ---
+        if (
+            gesture is None
+            and abs_dgz > SWIPE_GZ_THRESHOLD
+            and abs_dy < AY_DURING_SWIPE_LIMIT
+        ):
+            if dgz > 0:
+                gesture = "SWIPE_UP"
+            else:
+                gesture = "SWIPE_DOWN"
 
-        time.sleep(0.01)  # 100 Hz loop
+        # Uncomment this to keep tuning / debugging:
+        # print(f"ax={ax} ay={ay} az={az} | gx={gx} gy={gy} gz={gz} | dy={dy} dgz={dgz}")
+
+        time.sleep(0.01)  # ~100 Hz loop
 
     return gesture
-
 
 def main():
     bus = SMBus(1)
@@ -136,16 +182,14 @@ def main():
 
             # 2 & 3) Wait for exactly one gesture and print it
             gesture = detect_single_gesture(bus, baseline_ay, baseline_gz)
-            print(f"\nSTEP 4: GESTURE DETECTED: {gesture}")
+            print(f"\nGESTURE DETECTED: {gesture}")
 
             # 5) Cooldown
-            print(f"STEP 5: Cooldown for {GESTURE_COOLDOWN} seconds...")
+            print(f"Cooldown for {GESTURE_COOLDOWN} seconds...")
             time.sleep(GESTURE_COOLDOWN)
 
             # 6) Recalibrate base position happens automatically on next loop
-            print("STEP 6–8: Recalibrating and ready for a NEW gesture cycle...")
-
-            # Loop repeats: recalibrate, notify, detect, print...
+            print("Recalibrating for a new gesture cycle...")
 
     except KeyboardInterrupt:
         print("\nStopping gesture program.")
