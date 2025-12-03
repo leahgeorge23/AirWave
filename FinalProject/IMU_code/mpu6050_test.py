@@ -1,7 +1,7 @@
 # requires installation of:
 
-sudo pip3 install rpi_ws281x adafruit-circuitpython-neopixel
-sudo python3 -m pip install --force-reinstall adafruit-blinka
+# sudo pip3 install rpi_ws281x adafruit-circuitpython-neopixel
+# sudo python3 -m pip install --force-reinstall adafruit-blinka
 
 # to implement when gesture is recognized:
 from led_feedback import led_feedback
