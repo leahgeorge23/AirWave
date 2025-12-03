@@ -4,7 +4,7 @@
 
 # to implement when gesture is recognized:
 #	from led_feedback import led_feedback
-#	led_feedback()
+#	flash_green()
 
 import time
 import board
