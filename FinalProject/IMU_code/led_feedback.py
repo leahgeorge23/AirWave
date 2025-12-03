@@ -3,7 +3,7 @@
 #	sudo python3 -m pip install --force-reinstall adafruit-blinka
 
 # to implement when gesture is recognized:
-#	from led_feedback import led_feedback
+#	from led_feedback import flash_green
 #	flash_green()
 
 import time
