@@ -191,7 +191,6 @@ def main():
             # 2 & 3) Wait for exactly one gesture and print it
             gesture = detect_single_gesture(bus, baseline_ay, baseline_gz)
             print(f"\nGESTURE DETECTED: {gesture}")
-            led_feedback()
             flash_green()
 
             # 5) Cooldown
