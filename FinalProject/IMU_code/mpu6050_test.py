@@ -1,3 +1,11 @@
+# requires installation of:
+
+sudo pip3 install rpi_ws281x adafruit-circuitpython-neopixel
+sudo python3 -m pip install --force-reinstall adafruit-blinka
+
+# to implement when gesture is recognized:
+from led_feedback import led_feedback
+
 #!/usr/bin/env python3
 import time
 from smbus2 import SMBus
@@ -183,6 +191,8 @@ def main():
             # 2 & 3) Wait for exactly one gesture and print it
             gesture = detect_single_gesture(bus, baseline_ay, baseline_gz)
             print(f"\nGESTURE DETECTED: {gesture}")
+            led_feedback()
+            flash_green()
 
             # 5) Cooldown
             print(f"Cooldown for {GESTURE_COOLDOWN} seconds...")
