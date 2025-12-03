@@ -173,7 +173,7 @@ def detect_single_gesture(bus, baseline_ay, baseline_gz):
     return gesture
 
 def main():
-    bus = SMBus(6)
+    bus = SMBus(1)
     init_mpu6050(bus)
 
     print("MPU6050 gesture program started.")
