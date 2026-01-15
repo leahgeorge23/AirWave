@@ -1,5 +1,6 @@
 # requires:
 #   sudo pip3 install adafruit-circuitpython-neopixel
+#   only demo - to be integrated with Raspotify
 
 import time
 import math
