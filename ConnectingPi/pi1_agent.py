@@ -28,7 +28,7 @@ import paho.mqtt.client as mqtt
 # ============================================================================
 # CONFIGURATION - Update MQTT_BROKER to your Mac's IP address
 # ============================================================================
-MQTT_BROKER = "172.22.172.152"  # Your Mac's IP
+MQTT_BROKER = "Drews-MacBook-Pro.local"  # Your Mac's hostname
 MQTT_PORT = 1883
 MQTT_KEEPALIVE = 60
 

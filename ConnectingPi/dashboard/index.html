@@ -563,6 +563,27 @@
                     <div class="stat-label">Auto Volume</div>
                     <div class="stat-value" id="autoVolumeStatus">--</div>
                 </div>
+                <div class="stat-box">
+                    <div class="stat-label">Mood</div>
+                    <div class="stat-value" id="moodValue">--</div>
+                </div>
+            </div>
+
+            <!-- Mood & Playlist Section -->
+            <div id="moodSection" style="display: none; margin-top: 20px;">
+                <h3 style="margin-bottom: 15px;">🎵 Mood-Based Playlist</h3>
+                <div style="background: rgba(255,255,255,0.05); border-radius: 12px; padding: 20px;">
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <div id="moodEmoji" style="font-size: 3rem;">😐</div>
+                        <div style="flex: 1;">
+                            <div style="font-size: 1.2rem; font-weight: 600; color: #00d9ff; margin-bottom: 5px;" id="moodLabel">Detecting mood...</div>
+                            <div style="color: rgba(255,255,255,0.6); font-size: 0.9rem;" id="playlistName">--</div>
+                        </div>
+                        <a id="playlistLink" href="#" target="_blank" class="btn btn-success" style="text-decoration: none;">
+                            🎧 Open Playlist
+                        </a>
+                    </div>
+                </div>
             </div>
 
             <h3 style="margin: 20px 0 15px;">Pan-Tilt Control</h3>
@@ -574,6 +595,15 @@
                     <button class="pantilt-btn" onclick="sendPanTilt('right')">→</button>
                 </div>
                 <button class="pantilt-btn" onclick="sendPanTilt('down')">↓</button>
+            </div>
+
+            <div style="margin-top: 20px; text-align: center;">
+                <button class="btn btn-primary btn-lg" onclick="recalibrateDistance()" style="width: 100%;">
+                    📏 Recalibrate Distance
+                </button>
+                <div style="color: rgba(255,255,255,0.5); font-size: 0.8rem; margin-top: 8px;">
+                    Stand at your preferred reference distance (5 ft) and click to calibrate
+                </div>
             </div>
 
             <h3 style="margin: 25px 0 15px;">Settings</h3>
@@ -620,6 +650,7 @@
         const TOPIC_PI1_COMMANDS = 'home/pi1/commands';
         const TOPIC_PI2_STATUS = 'home/pi2/status';
         const TOPIC_PI2_COMMANDS = 'home/pi2/commands';
+        const TOPIC_MOOD = 'home/mood';
 
         // ============================================================
         // MQTT CONNECTION
@@ -650,7 +681,8 @@
                 client.subscribe([
                     TOPIC_GESTURES,
                     TOPIC_PI1_STATUS,
-                    TOPIC_PI2_STATUS
+                    TOPIC_PI2_STATUS,
+                    TOPIC_MOOD
                 ], (err) => {
                     if (err) {
                         console.error('Subscribe error:', err);
@@ -717,6 +749,9 @@
                     break;
                 case TOPIC_PI2_STATUS:
                     handlePi2Status(payload);
+                    break;
+                case TOPIC_MOOD:
+                    handleMood(payload);
                     break;
             }
         }
@@ -794,6 +829,40 @@
                     document.getElementById('ledEnabled').checked = payload.led_enabled;
                 }
             }
+        }
+
+        function handleMood(payload) {
+            const moodEmojis = {
+                'happy': '😊',
+                'sad': '😢',
+                'energetic': '⚡',
+                'calm': '😌',
+                'neutral': '😐'
+            };
+            
+            const moodColors = {
+                'happy': '#FFD700',
+                'sad': '#6495ED',
+                'energetic': '#FF6B6B',
+                'calm': '#98D8C8',
+                'neutral': '#B0B0B0'
+            };
+
+            const mood = payload.mood || 'neutral';
+            const playlistName = payload.playlist_name || 'Unknown';
+            const playlistUrl = payload.playlist_url || '#';
+
+            // Show mood section
+            document.getElementById('moodSection').style.display = 'block';
+            
+            // Update mood display
+            document.getElementById('moodEmoji').textContent = moodEmojis[mood] || '😐';
+            document.getElementById('moodLabel').textContent = mood.charAt(0).toUpperCase() + mood.slice(1) + ' Mood Detected';
+            document.getElementById('moodLabel').style.color = moodColors[mood] || '#00d9ff';
+            document.getElementById('moodValue').textContent = mood.charAt(0).toUpperCase() + mood.slice(1);
+            document.getElementById('moodValue').style.color = moodColors[mood] || '#00d9ff';
+            document.getElementById('playlistName').textContent = '🎵 ' + playlistName;
+            document.getElementById('playlistLink').href = playlistUrl;
         }
 
         function handlePi2Status(payload) {
@@ -950,6 +1019,11 @@
                     sendToPi2({ command: 'center' });
                     break;
             }
+        }
+
+        function recalibrateDistance() {
+            sendToPi2({ command: 'recalibrate' });
+            addLog('system', 'Sent recalibration request to Pi 2');
         }
 
         // ============================================================

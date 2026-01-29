@@ -1,0 +1,308 @@
+#!/usr/bin/env python3
+
+import cv2
+import pantilthat
+import time
+import subprocess
+import numpy as np
+
+VOL_NEAR = 40
+VOL_MID = 70
+VOL_FAR = 100
+REF_DISTANCE_FEET = 5.0
+BOUND_NEAR_MID = 4.0
+BOUND_MID_FAR = 6.0
+VOLUME_SMOOTH_ALPHA = 0.3
+DIST_SMOOTH_ALPHA = 0.15
+MAX_DIST_STEP_FT = 0.5
+
+Kp_pan = 0.025
+dead_zone = 12.0
+max_step = 5.0
+
+FACE_CASCADE = "/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml"
+PROFILE_CASCADE = "/usr/share/opencv/haarcascades/haarcascade_profileface.xml"
+UPPER_BODY_CASCADE = "/usr/share/opencv/haarcascades/haarcascade_upperbody.xml"
+
+def set_volume(percent):
+    percent = max(0, min(100, percent))
+    try:
+        subprocess.run(
+            ["amixer", "sset", "Headphone", f"{int(percent)}%"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+    except Exception as e:
+        print("Volume set error:", e)
+
+def print_available_trackers():
+    print("OpenCV version:", cv2.__version__)
+    tracker_types = ['TrackerCSRT', 'TrackerKCF', 'TrackerMOSSE',
+                     'TrackerMIL', 'TrackerBoosting', 'TrackerMedianFlow',
+                     'TrackerTLD', 'TrackerGOTURN']
+    print("In cv2:")
+    for t in tracker_types:
+        if hasattr(cv2, t + '_create'):
+            print(f"  {t}_create: YES")
+        elif hasattr(cv2, t):
+            print(f"  {t}: YES")
+    if hasattr(cv2, 'legacy'):
+        print("In cv2.legacy:")
+        for t in tracker_types:
+            if hasattr(cv2.legacy, t + '_create'):
+                print(f"  {t}_create: YES")
+
+def create_tracker():
+    print_available_trackers()
+    try:
+        tracker = cv2.TrackerCSRT.create()
+        print("Created: cv2.TrackerCSRT.create()")
+        return tracker
+    except:
+        pass
+    try:
+        tracker = cv2.TrackerCSRT_create()
+        print("Created: cv2.TrackerCSRT_create()")
+        return tracker
+    except:
+        pass
+    try:
+        tracker = cv2.TrackerKCF.create()
+        print("Created: cv2.TrackerKCF.create()")
+        return tracker
+    except:
+        pass
+    try:
+        tracker = cv2.TrackerKCF_create()
+        print("Created: cv2.TrackerKCF_create()")
+        return tracker
+    except:
+        pass
+    if hasattr(cv2, 'legacy'):
+        try:
+            tracker = cv2.legacy.TrackerCSRT_create()
+            print("Created: cv2.legacy.TrackerCSRT_create()")
+            return tracker
+        except:
+            pass
+        try:
+            tracker = cv2.legacy.TrackerKCF_create()
+            print("Created: cv2.legacy.TrackerKCF_create()")
+            return tracker
+        except:
+            pass
+        try:
+            tracker = cv2.legacy.TrackerMOSSE_create()
+            print("Created: cv2.legacy.TrackerMOSSE_create()")
+            return tracker
+        except:
+            pass
+    try:
+        tracker = cv2.TrackerMIL.create()
+        print("Created: cv2.TrackerMIL.create()")
+        return tracker
+    except:
+        pass
+    try:
+        tracker = cv2.TrackerMIL_create()
+        print("Created: cv2.TrackerMIL_create()")
+        return tracker
+    except:
+        pass
+    print("ERROR: No tracker could be created")
+    return None
+
+def detect_person(frame, face_cascade, profile_cascade, upper_body_cascade):
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5, minSize=(50, 50))
+    if len(faces) > 0:
+        x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+        expand = int(w * 0.3)
+        x = max(0, x - expand)
+        y = max(0, y - expand)
+        w = min(frame.shape[1] - x, w + expand * 2)
+        h = min(frame.shape[0] - y, h + expand * 2)
+        print("Detected: frontal face")
+        return (x, y, w, h)
+    if not profile_cascade.empty():
+        profiles = profile_cascade.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5, minSize=(50, 50))
+        if len(profiles) > 0:
+            x, y, w, h = max(profiles, key=lambda f: f[2] * f[3])
+            expand = int(w * 0.3)
+            x = max(0, x - expand)
+            y = max(0, y - expand)
+            w = min(frame.shape[1] - x, w + expand * 2)
+            h = min(frame.shape[0] - y, h + expand * 2)
+            print("Detected: profile face")
+            return (x, y, w, h)
+        flipped = cv2.flip(gray, 1)
+        profiles = profile_cascade.detectMultiScale(flipped, scaleFactor=1.2, minNeighbors=5, minSize=(50, 50))
+        if len(profiles) > 0:
+            x, y, w, h = max(profiles, key=lambda f: f[2] * f[3])
+            x = frame.shape[1] - x - w
+            expand = int(w * 0.3)
+            x = max(0, x - expand)
+            y = max(0, y - expand)
+            w = min(frame.shape[1] - x, w + expand * 2)
+            h = min(frame.shape[0] - y, h + expand * 2)
+            print("Detected: profile face (flipped)")
+            return (x, y, w, h)
+    if not upper_body_cascade.empty():
+        bodies = upper_body_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(80, 80))
+        if len(bodies) > 0:
+            x, y, w, h = max(bodies, key=lambda f: f[2] * f[3])
+            print("Detected: upper body")
+            return (x, y, w, h)
+    return None
+
+def lock_onto_person(cap, face_cascade, profile_cascade, upper_body_cascade):
+    print("Looking for a person to lock onto...")
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            continue
+        bbox = detect_person(frame, face_cascade, profile_cascade, upper_body_cascade)
+        if bbox is not None:
+            x, y, w, h = bbox
+            print(f"Locked on at ({x}, {y}) size {w}x{h}")
+            tracker = create_tracker()
+            if tracker is None:
+                print("Failed to create tracker, will use detection-only mode")
+                return None, bbox, w * h
+            try:
+                success = tracker.init(frame, (x, y, w, h))
+                if not success:
+                    print("Tracker init returned False")
+                    return None, bbox, w * h
+            except Exception as e:
+                print(f"Tracker init error: {e}")
+                return None, bbox, w * h
+            ref_area = w * h
+            print(f"Reference area: {ref_area}")
+            print("Tracking started!")
+            return tracker, bbox, ref_area
+        print("Searching for person...")
+        time.sleep(0.1)
+
+def main():
+    cap = cv2.VideoCapture(0)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_FPS, 30)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+    if not cap.isOpened():
+        print("Could not open camera")
+        return
+
+    face_cascade = cv2.CascadeClassifier(FACE_CASCADE)
+    profile_cascade = cv2.CascadeClassifier(PROFILE_CASCADE)
+    upper_body_cascade = cv2.CascadeClassifier(UPPER_BODY_CASCADE)
+
+    if face_cascade.empty():
+        print("Warning: Could not load face cascade")
+    if profile_cascade.empty():
+        print("Warning: Could not load profile cascade")
+    if upper_body_cascade.empty():
+        print("Warning: Could not load upper body cascade")
+
+    tracker, bbox, ref_area = lock_onto_person(cap, face_cascade, profile_cascade, upper_body_cascade)
+
+    use_tracker = tracker is not None
+    if not use_tracker:
+        print("Falling back to detection-only mode (slower)")
+
+    pan = 0.0
+    error_filtered = 0.0
+    vol_current = VOL_FAR
+    set_volume(vol_current)
+
+    distance_ft = REF_DISTANCE_FEET
+
+    lost_frames = 0
+    MAX_LOST_FRAMES = 45
+    detect_interval = 3
+    frame_count = 0
+
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                continue
+
+            h, w = frame.shape[:2]
+            center_x = w / 2.0
+
+            success = False
+
+            if use_tracker:
+                success, bbox = tracker.update(frame)
+            else:
+                frame_count += 1
+                if frame_count % detect_interval == 0:
+                    detected = detect_person(frame, face_cascade, profile_cascade, upper_body_cascade)
+                    if detected:
+                        bbox = detected
+                        success = True
+
+            if success and bbox is not None:
+                x, y, bw, bh = [int(v) for v in bbox]
+                cx = x + bw / 2.0
+                cy = y + bh / 2.0
+                area = bw * bh
+                lost_frames = 0
+
+                raw_error = center_x - cx
+                error_filtered = 0.5 * error_filtered + 0.5 * raw_error
+
+                if abs(error_filtered) > dead_zone:
+                    delta = error_filtered * Kp_pan
+                    delta = max(-max_step, min(max_step, delta))
+                    pan += delta
+                    pan = max(-90.0, min(90.0, pan))
+                    pantilthat.pan(pan)
+
+                size_ratio = ref_area / float(area) if area > 0 else 1.0
+                distance_raw = REF_DISTANCE_FEET * np.sqrt(size_ratio)
+
+                delta_d = distance_raw - distance_ft
+                if delta_d > MAX_DIST_STEP_FT:
+                    distance_raw = distance_ft + MAX_DIST_STEP_FT
+                elif delta_d < -MAX_DIST_STEP_FT:
+                    distance_raw = distance_ft - MAX_DIST_STEP_FT
+
+                distance_ft = (1.0 - DIST_SMOOTH_ALPHA) * distance_ft + DIST_SMOOTH_ALPHA * distance_raw
+
+                if distance_ft <= BOUND_NEAR_MID:
+                    zone_vol = VOL_NEAR
+                elif distance_ft <= BOUND_MID_FAR:
+                    zone_vol = VOL_MID
+                else:
+                    zone_vol = VOL_FAR
+
+                vol_current = (1.0 - VOLUME_SMOOTH_ALPHA) * vol_current + VOLUME_SMOOTH_ALPHA * zone_vol
+                set_volume(vol_current)
+
+                print(f"pan={pan:.1f} dist≈{distance_ft:.1f}ft vol={vol_current:.0f}%")
+            else:
+                lost_frames += 1
+                error_filtered *= 0.9
+
+                if lost_frames % 10 == 0:
+                    print(f"Tracking lost ({lost_frames}/{MAX_LOST_FRAMES})")
+
+                if lost_frames > MAX_LOST_FRAMES:
+                    print("Re-acquiring target...")
+                    tracker, bbox, ref_area = lock_onto_person(cap, face_cascade, profile_cascade, upper_body_cascade)
+                    use_tracker = tracker is not None
+                    lost_frames = 0
+
+    except KeyboardInterrupt:
+        pass
+
+    cap.release()
+    pantilthat.pan(0.0)
+    print("Stopped.")
+
+if __name__ == "__main__":
+    main()
