@@ -225,8 +225,10 @@ class GestureEngine:
 
         if abs(daz_best) >= SWIPE_DAZ_THR_G:
             if SWIPE_UP_IS_POSITIVE_DAZ:
+                flash_green()
                 return "PAUSE" if daz_best > 0 else "PLAY"
             else:
+                flash_green()
                 return "PAUSE" if daz_best < 0 else "PLAY"
         return None
 
