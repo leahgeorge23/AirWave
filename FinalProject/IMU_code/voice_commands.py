@@ -5,8 +5,8 @@
 import speech_recognition as sr
 import time
 
-# to implement when gesture is recognized:
-# from led_feedback import led_feedback
+# to implement when voice command is recognized:
+from led_feedback import led_feedback
 
 DEVICE_INDEX = 9       # "array" device index in list_devices.py
 SAMPLE_RATE = 48000
@@ -68,7 +68,7 @@ def main():
                 cmd = map_command(text)
                 if cmd:
                     print("[COMMAND]", cmd)
-                    # flash_green()
+                    flash_green()
                     #implement control queue logic and playback control
                 else:
                     print("[COMMAND] None")
