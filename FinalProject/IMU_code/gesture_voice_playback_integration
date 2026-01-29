@@ -1,0 +1,40 @@
+import voice_commands
+import BLUETOOTH_GESTURE_READINGS as gesture_commands
+
+
+def get_command():
+    voice_command = voice_commands.get_voice_command()
+    gesture_command = gesture_commands.get_gesture_command()
+
+    if voice_command is not None:
+        command = voice_command
+    else:
+        command = gesture_command
+
+    return command
+
+
+while True:
+    command = get_command()
+
+    match command:
+        case "PREV_TRACK":
+            prev_track()
+
+        case "NEXT_TRACK":
+            next_track()
+
+        case "PAUSE":
+            pause()
+
+        case "PLAY":
+            play()
+
+        case "VOL_UP":
+            volume_up()
+
+        case "VOL_DOWN":
+            volume_down()
+
+        case None:
+            pass
