@@ -185,9 +185,9 @@ class GestureEngine:
         gy = s[5]
         if abs(gy) >= TWIST_GY_THR_DPS:
             if TWIST_RIGHT_IS_POSITIVE_GY:
-                return "TWIST_RIGHT" if gy > 0 else "TWIST_LEFT"
+                return "NEXT_TRACK" if gy > 0 else "PREV_TRACK"
             else:
-                return "TWIST_RIGHT" if gy < 0 else "TWIST_LEFT"
+                return "NEXT_TRACK" if gy < 0 else "PREV_TRACK"
         return None
 
     def _update_command_baseline(self):
@@ -225,9 +225,9 @@ class GestureEngine:
 
         if abs(daz_best) >= SWIPE_DAZ_THR_G:
             if SWIPE_UP_IS_POSITIVE_DAZ:
-                return "SWIPE_UP" if daz_best > 0 else "SWIPE_DOWN"
+                return "PAUSE" if daz_best > 0 else "PLAY"
             else:
-                return "SWIPE_UP" if daz_best < 0 else "SWIPE_DOWN"
+                return "PAUSE" if daz_best < 0 else "PLAY"
         return None
 
     async def step(self):
@@ -322,7 +322,7 @@ async def run(client: BleakClient, notify_uuid: str, label: str):
     await asyncio.sleep(2.0)
 
     print("\nIDLE: DOUBLE FLICK to arm command mode.")
-    print("COMMAND: one of {TWIST_RIGHT, TWIST_LEFT, SWIPE_UP, SWIPE_DOWN}.")
+    print("COMMAND: one of {NEXT_TRACK, PREV_TRACK, PAUSE, PLAY}.")
     print("COMMAND: DOUBLE FLICK again cancels.\n")
 
     try:
@@ -346,7 +346,7 @@ async def run(client: BleakClient, notify_uuid: str, label: str):
                 print("\n>>> CANCELLED -> Back to IDLE mode <<<")
             elif evt == "COMMAND_TIMEOUT":
                 print("\n>>> TIMEOUT -> Back to IDLE mode <<<")
-            elif evt in ("TWIST_RIGHT", "TWIST_LEFT", "SWIPE_UP", "SWIPE_DOWN"):
+            elif evt in ("NEXT_TRACK", "PREV_TRACK", "PAUSE", "PLAY"):
                 print(f"\nGESTURE: {evt}")
                 print(">>> Back to IDLE mode <<<")
 
