@@ -78,30 +78,16 @@ def main():
         match cmd:
             case "PREV_TRACK":
                 prev_track()
-                flash_green()
-
             case "NEXT_TRACK":
                 next_track()
-                flash_green()
-
             case "PAUSE":
-                pause()
-                flash_green()
-
+                    pause()
             case "PLAY":
                 play()
-                flash_green()
-
             case "VOL_UP":
                 volume_up()
-                flash_green()
-
             case "VOL_DOWN":
                 volume_down()
-                flash_green()
-
-            case _:
-                pass
 
         time.sleep(0.05)
 
