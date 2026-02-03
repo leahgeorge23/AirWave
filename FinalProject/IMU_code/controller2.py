@@ -92,9 +92,5 @@ def main():
             case "VOL_DOWN":
                 volume_down()
 
-        flash_green()
-        time.sleep(0.05)
-
-
 if __name__ == "__main__":
     main()
