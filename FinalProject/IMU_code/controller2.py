@@ -1,8 +1,6 @@
 import time
 import re
 import subprocess
-
-from led_feedback import flash_green
 import pi1_agent
 
 
