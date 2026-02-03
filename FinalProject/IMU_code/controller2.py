@@ -2,10 +2,8 @@ import time
 import re
 import subprocess
 
-#import voice_commands
-#import bluetooth_gesture_readings as gesture_commands
 from led_feedback import flash_green
-import pi_agent
+import pi1_agent
 
 
 # ---------- BlueZ AVRCP playback control ----------
@@ -53,25 +51,10 @@ def volume_down(step_pct: int = 5):
 
 
 # ---------- Arbitration ----------
-def get_command():
-
-  
-    #voice_cmd = voice_commands.get_voice_command()
-    #gest_cmd = gesture_commands.get_gesture_command()
-
-    #if voice_cmd is not None:
-    #    return voice_cmd
-    #if gest_cmd is not None:
-    #    return gest_cmd
-    #return None
-
 
 def main():
-    #voice_commands.start_voice_listener()
-    #gesture_commands.start_gesture_listener()
 
     while True:
-        #cmd = get_command()
         cmd = pi1_agent.get_voice_command()
 
         if cmd is None:
