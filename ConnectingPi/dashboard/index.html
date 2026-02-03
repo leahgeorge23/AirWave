@@ -640,11 +640,23 @@
 
     <script>
         // ============================================================
-        // CONFIGURATION - Update this to your Mac's IP
+        // CONFIGURATION - EDIT THESE WHEN TRANSFERRING TO NEW COMPUTER
         // ============================================================
-        const MQTT_BROKER = 'ws://127.0.0.1:9001';
+        // Option 1: Use localhost (if MQTT broker runs on same machine as browser)
+        // Option 2: Use your computer's IP address (e.g., '192.168.1.100')
+        // Option 3: Use your computer's hostname (e.g., 'your-computer.local')
+        //
+        // Note: MQTT WebSocket port is typically 9001 (not 1883)
+        // Make sure your MQTT broker has WebSockets enabled on port 9001
+        // ============================================================
         
-        // Topics
+        // ⬇️ CHANGE THIS to your MQTT broker address ⬇️
+        const MQTT_HOST = 'Drews-MacBook-Pro.local';  // <-- CHANGE THIS (e.g., '192.168.1.100' or 'your-mac.local')
+        const MQTT_WS_PORT = 9001;      // WebSocket port (usually 9001)
+        
+        const MQTT_BROKER = `ws://${MQTT_HOST}:${MQTT_WS_PORT}`;
+        
+        // Topics (usually don't need to change)
         const TOPIC_GESTURES = 'home/gestures';
         const TOPIC_PI1_STATUS = 'home/pi1/status';
         const TOPIC_PI1_COMMANDS = 'home/pi1/commands';
