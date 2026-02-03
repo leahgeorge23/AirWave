@@ -1,7 +1,4 @@
 #!/usr/bin/env python3
-"""
-Pi 2 Agent - MQTT-enabled controller based on person_tracker_with_mood.py
-"""
 
 import cv2
 import pantilthat
@@ -11,26 +8,59 @@ import numpy as np
 import random
 import threading
 import json
-import os
-import socket
 import paho.mqtt.client as mqtt
 
 # ============================================================================
-# MQTT CONFIGURATION
+# CONFIGURATION - EDIT config.py OR SET ENVIRONMENT VARIABLES
 # ============================================================================
-_default_host = f"Leahs-MacBook-Pro.local"
-MQTT_BROKER = os.environ.get("MQTT_BROKER", _default_host)
-MQTT_PORT = 1883
-MQTT_KEEPALIVE = 60
+# To configure for a new computer, either:
+#   1. Edit config.py (recommended)
+#   2. Set environment variables:
+#      export MQTT_BROKER="your-computer.local"
+#      export SPEAKER_MAC="XX:XX:XX:XX:XX:XX"
+# ============================================================================
+try:
+    from config import (
+        MQTT_BROKER, MQTT_PORT, MQTT_KEEPALIVE,
+        BLUETOOTH_SPEAKER_MAC, BLUETOOTH_SPEAKER_NAME,
+        FACE_CASCADE_PATH, PROFILE_CASCADE_PATH, UPPER_BODY_CASCADE_PATH,
+        EYE_CASCADE_PATH, SMILE_CASCADE_PATH
+    )
+except ImportError:
+    # Fallback if config.py doesn't exist
+    import os
+    MQTT_BROKER = os.environ.get("MQTT_BROKER", "Drews-MacBook-Pro.local")  # <-- CHANGE THIS
+    MQTT_PORT = 1883
+    MQTT_KEEPALIVE = 60
+    BLUETOOTH_SPEAKER_MAC = os.environ.get("SPEAKER_MAC", "F8:7D:76:AA:A8:8C")  # <-- CHANGE THIS
+    BLUETOOTH_SPEAKER_NAME = "A2DP"
+    _cascade_dir = cv2.data.haarcascades if hasattr(cv2, 'data') else "/usr/share/opencv/haarcascades/"
+    FACE_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_frontalface_default.xml")
+    PROFILE_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_profileface.xml")
+    UPPER_BODY_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_upperbody.xml")
+    EYE_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_eye.xml")
+    SMILE_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_smile.xml")
 
 TOPIC_GESTURES = "home/gestures"
 TOPIC_PI2_STATUS = "home/pi2/status"
 TOPIC_PI2_COMMANDS = "home/pi2/commands"
 TOPIC_MOOD = "home/mood"
 
-# ============================================================================
-# TRACKING CONFIGURATION (from person_tracker_with_mood.py)
-# ============================================================================
+mqtt_client = None
+manual_volume_override = None
+tracking_enabled = True
+auto_volume_enabled = True
+ref_area = None
+recalibrate_requested = False
+
+# Global state for dashboard
+current_volume = 100
+current_distance = 5.0
+current_pan = 0.0
+current_tilt = 0.0
+is_tracking = False
+current_mood = "neutral"
+
 VOL_NEAR = 70
 VOL_MID = 80
 VOL_FAR = 100
@@ -46,16 +76,16 @@ Kd_pan = 0.015
 dead_zone = 10.0
 max_step = 3.0
 error_smooth = 0.3
-VOL_STEP = 10
 
 MOOD_CHECK_INTERVAL = 60
 LAST_MOOD_CHECK = 0
 
-FACE_CASCADE = "/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml"
-PROFILE_CASCADE = "/usr/share/opencv/haarcascades/haarcascade_profileface.xml"
-UPPER_BODY_CASCADE = "/usr/share/opencv/haarcascades/haarcascade_upperbody.xml"
-EYE_CASCADE = "/usr/share/opencv/haarcascades/haarcascade_eye.xml"
-SMILE_CASCADE = "/usr/share/opencv/haarcascades/haarcascade_smile.xml"
+# Cascade paths loaded from config.py
+FACE_CASCADE = FACE_CASCADE_PATH
+PROFILE_CASCADE = PROFILE_CASCADE_PATH
+UPPER_BODY_CASCADE = UPPER_BODY_CASCADE_PATH
+EYE_CASCADE = EYE_CASCADE_PATH
+SMILE_CASCADE = SMILE_CASCADE_PATH
 
 PLAYLISTS = {
     "happy": [
@@ -86,104 +116,6 @@ PLAYLISTS = {
 }
 
 # ============================================================================
-# GLOBAL STATE
-# ============================================================================
-mqtt_client = None
-manual_volume_override = None
-tracking_enabled = True
-auto_volume_enabled = True
-ref_area = None
-recalibrate_requested = False
-
-current_volume = VOL_FAR
-current_distance = REF_DISTANCE_FEET
-current_pan = 0.0
-current_tilt = 0.0
-is_tracking = False
-current_mood = "neutral"
-
-# ============================================================================
-# MQTT HELPERS
-# ============================================================================
-def publish_status():
-    if mqtt_client and mqtt_client.is_connected():
-        payload = {
-            "volume": current_volume,
-            "distance_ft": round(current_distance, 1),
-            "is_tracking": is_tracking,
-            "tracking_enabled": tracking_enabled,
-            "auto_volume_enabled": auto_volume_enabled,
-            "manual_override": manual_volume_override is not None,
-            "pan_angle": round(current_pan, 1),
-            "tilt_angle": round(current_tilt, 1),
-            "mood": current_mood,
-            "timestamp": time.time(),
-        }
-        mqtt_client.publish(TOPIC_PI2_STATUS, json.dumps(payload))
-
-
-def publish_mood(mood, playlist_name, playlist_url):
-    if mqtt_client and mqtt_client.is_connected():
-        payload = {
-            "mood": mood,
-            "playlist_name": playlist_name,
-            "playlist_url": playlist_url,
-            "timestamp": time.time(),
-        }
-        mqtt_client.publish(TOPIC_MOOD, json.dumps(payload))
-        print(f"[MQTT] Published mood: {mood} -> {playlist_name}")
-
-
-# ============================================================================
-# VOLUME / MEDIA CONTROL
-# ============================================================================
-def set_volume(percent):
-    global current_volume
-    percent = max(0, min(100, int(percent)))
-    current_volume = percent
-    try:
-        subprocess.run(
-            ["amixer", "-D", "bluealsa", "sset", "F8:7D:76:AA:A8:8C - A2DP", f"{percent}%"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except Exception as e:
-        print(f"[VOLUME] Error: {e}")
-
-
-def adjust_volume(delta):
-    global manual_volume_override
-    new_vol = max(0, min(100, current_volume + delta))
-    manual_volume_override = new_vol
-    set_volume(new_vol)
-
-    def clear_override():
-        global manual_volume_override
-        time.sleep(10)
-        if manual_volume_override == new_vol:
-            manual_volume_override = None
-
-    threading.Thread(target=clear_override, daemon=True).start()
-
-
-def handle_media_command(command: str):
-    """Route playback commands to the local player (playerctl-compatible)."""
-    cmd_map = {
-        "NEXT_TRACK": ["playerctl", "next"],
-        "PREV_TRACK": ["playerctl", "previous"],
-        "PLAY": ["playerctl", "play"],
-        "PAUSE": ["playerctl", "pause"],
-    }
-    if command not in cmd_map:
-        return
-    try:
-        subprocess.run(cmd_map[command], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-        print(f"[MEDIA] Sent {command}")
-    except Exception as e:
-        print(f"[MEDIA] Error sending {command}: {e}")
-
-
-# ============================================================================
 # MQTT CALLBACKS
 # ============================================================================
 def on_mqtt_connect(client, userdata, flags, rc):
@@ -192,38 +124,30 @@ def on_mqtt_connect(client, userdata, flags, rc):
         client.subscribe(TOPIC_GESTURES)
         client.subscribe(TOPIC_PI2_COMMANDS)
         print(f"[MQTT] Subscribed to topics")
-        publish_status()
     else:
         print(f"[MQTT] Connection failed with code {rc}")
 
-
 def on_mqtt_message(client, userdata, msg):
-    global tracking_enabled, auto_volume_enabled, manual_volume_override, current_pan, current_tilt, recalibrate_requested
+    global tracking_enabled, auto_volume_enabled, manual_volume_override, current_pan, current_tilt
     try:
         payload = json.loads(msg.payload.decode())
-
+        
         if msg.topic == TOPIC_GESTURES:
             gesture_type = payload.get("type", "")
-            print(f"[MQTT] Gesture received: {gesture_type} from {payload.get('device','?')}")
             if gesture_type in ["SWIPE_UP", "VOL_UP"]:
-                adjust_volume(VOL_STEP)
+                adjust_volume(10)
             elif gesture_type in ["SWIPE_DOWN", "VOL_DOWN"]:
-                adjust_volume(-VOL_STEP)
-            elif gesture_type in ["NEXT_TRACK", "PREV_TRACK", "PLAY", "PAUSE"]:
-                handle_media_command(gesture_type)
-
+                adjust_volume(-10)
+                
         elif msg.topic == TOPIC_PI2_COMMANDS:
             command = payload.get("command", "")
-            print(f"[COMMAND] {command} | payload={payload}")
-
+            print(f"[COMMAND] Received: {command} with payload: {payload}")
+            
             if command == "set_volume":
                 level = payload.get("level", 50)
+                print(f"[VOLUME] Setting volume to {level}%")
                 manual_volume_override = level
                 set_volume(level)
-            elif command == "volume_up":
-                adjust_volume(VOL_STEP)
-            elif command == "volume_down":
-                adjust_volume(-VOL_STEP)
             elif command == "tracking_enable":
                 tracking_enabled = payload.get("enabled", True)
             elif command == "auto_volume_enable":
@@ -248,18 +172,113 @@ def on_mqtt_message(client, userdata, msg):
                 print("[COMMAND] Recalibration requested")
             elif command == "status":
                 publish_status()
-
+                
     except Exception as e:
         print(f"[MQTT] Error: {e}")
-
 
 def on_mqtt_disconnect(client, userdata, rc):
     print(f"[MQTT] Disconnected (rc={rc})")
 
+def publish_status():
+    global mqtt_client
+    if mqtt_client and mqtt_client.is_connected():
+        payload = {
+            "volume": current_volume,
+            "distance_ft": round(current_distance, 1),
+            "is_tracking": is_tracking,
+            "tracking_enabled": tracking_enabled,
+            "auto_volume_enabled": auto_volume_enabled,
+            "manual_override": manual_volume_override is not None,
+            "pan_angle": round(current_pan, 1),
+            "tilt_angle": round(current_tilt, 1),
+            "mood": current_mood,
+            "timestamp": time.time()
+        }
+        mqtt_client.publish(TOPIC_PI2_STATUS, json.dumps(payload))
 
-# ============================================================================
-# TRACKING / MOOD HELPERS
-# ============================================================================
+def publish_mood(mood, playlist_name, playlist_url):
+    global mqtt_client
+    if mqtt_client and mqtt_client.is_connected():
+        payload = {
+            "mood": mood,
+            "playlist_name": playlist_name,
+            "playlist_url": playlist_url,
+            "timestamp": time.time()
+        }
+        mqtt_client.publish(TOPIC_MOOD, json.dumps(payload))
+        print(f"[MQTT] Published mood: {mood} -> {playlist_name}")
+
+def adjust_volume(delta):
+    global manual_volume_override, current_volume
+    new_vol = max(0, min(100, current_volume + delta))
+    manual_volume_override = new_vol
+    set_volume(new_vol)
+    
+    def clear_override():
+        global manual_volume_override
+        time.sleep(10)
+        if manual_volume_override == new_vol:
+            manual_volume_override = None
+    threading.Thread(target=clear_override, daemon=True).start()
+
+def setup_mqtt():
+    global mqtt_client
+    mqtt_client = mqtt.Client(client_id="pi2_agent")
+    mqtt_client.on_connect = on_mqtt_connect
+    mqtt_client.on_message = on_mqtt_message
+    mqtt_client.on_disconnect = on_mqtt_disconnect
+    
+    mqtt_client.will_set(TOPIC_PI2_STATUS, json.dumps({
+        "status": "offline",
+        "timestamp": time.time()
+    }))
+    
+    try:
+        print(f"[MQTT] Connecting to {MQTT_BROKER}:{MQTT_PORT}...")
+        mqtt_client.connect(MQTT_BROKER, MQTT_PORT, MQTT_KEEPALIVE)
+        mqtt_client.loop_start()
+    except Exception as e:
+        print(f"[MQTT] Failed to connect: {e}")
+        print("[MQTT] Running offline")
+
+
+def set_volume(percent):
+    global current_volume
+    percent = max(0, min(100, percent))
+    current_volume = int(percent)
+    
+    try:
+        # Get all available BlueALSA controls dynamically
+        result = subprocess.run(
+            ["amixer", "-D", "bluealsa", "scontrols"],
+            capture_output=True,
+            text=True
+        )
+        
+        if result.returncode == 0 and result.stdout:
+            # Parse output like: Simple mixer control 'F8:7D:76:AA:A8:8C - A2DP',0
+            import re
+            controls = re.findall(r"Simple mixer control '([^']+)'", result.stdout)
+            
+            # Set volume on ALL connected Bluetooth devices
+            for control in controls:
+                subprocess.run(
+                    ["amixer", "-D", "bluealsa", "sset", control, f"{int(percent)}%"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+        else:
+            # Fallback to configured device if scontrols fails
+            device_name = f"{BLUETOOTH_SPEAKER_MAC} - {BLUETOOTH_SPEAKER_NAME}"
+            subprocess.run(
+                ["amixer", "-D", "bluealsa", "sset", device_name, f"{int(percent)}%"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+    except Exception as e:
+        print("Volume set error:", e)
+
+
 def create_tracker():
     try:
         return cv2.TrackerCSRT.create()
@@ -269,7 +288,7 @@ def create_tracker():
         return cv2.TrackerCSRT_create()
     except:
         pass
-    if hasattr(cv2, "legacy"):
+    if hasattr(cv2, 'legacy'):
         try:
             return cv2.legacy.TrackerCSRT_create()
         except:
@@ -331,65 +350,65 @@ def analyze_mood(frame, face_bbox, eye_cascade, smile_cascade):
     y = max(0, y)
     w = min(frame.shape[1] - x, w)
     h = min(frame.shape[0] - y, h)
-
+    
     if w <= 0 or h <= 0:
         return "neutral", 0
-
+    
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    face_roi = gray[y : y + h, x : x + w]
-    face_color = frame[y : y + h, x : x + w]
-
-    eye_region = face_roi[0 : h // 2, :]
+    face_roi = gray[y:y+h, x:x+w]
+    face_color = frame[y:y+h, x:x+w]
+    
+    eye_region = face_roi[0:h//2, :]
     eyes = eye_cascade.detectMultiScale(eye_region, 1.1, 10)
-
-    mouth_region = face_roi[h // 2 :, :]
+    
+    mouth_region = face_roi[h//2:, :]
     smiles = smile_cascade.detectMultiScale(mouth_region, scaleFactor=1.8, minNeighbors=20, minSize=(25, 25))
-
+    
     has_smile = len(smiles) > 0
     eyes_detected = len(eyes)
     brightness = np.mean(face_roi)
     contrast = np.std(face_roi)
     b, g, r = cv2.split(face_color)
     warmth = np.mean(r) - np.mean(b)
-
+    
     mood_scores = {"happy": 0, "sad": 0, "energetic": 0, "calm": 0, "neutral": 0}
-
+    
     if has_smile:
         mood_scores["happy"] += 3
         mood_scores["energetic"] += 1
     else:
         mood_scores["sad"] += 1
         mood_scores["calm"] += 1
-
+    
     if brightness > 140:
         mood_scores["happy"] += 1
         mood_scores["energetic"] += 1
     elif brightness < 100:
         mood_scores["sad"] += 1
         mood_scores["calm"] += 1
-
+    
     if contrast > 50:
         mood_scores["energetic"] += 1
         mood_scores["happy"] += 1
     else:
         mood_scores["calm"] += 2
-
+    
     if eyes_detected >= 2:
         mood_scores["energetic"] += 1
         mood_scores["happy"] += 1
     elif eyes_detected < 2:
         mood_scores["calm"] += 1
         mood_scores["sad"] += 1
-
+    
     if warmth > 20:
         mood_scores["happy"] += 1
     elif warmth < 0:
         mood_scores["sad"] += 1
-
+    
     dominant_mood = max(mood_scores, key=mood_scores.get)
     total = sum(mood_scores.values())
     confidence = mood_scores[dominant_mood] / total * 100 if total > 0 else 0
-
+    
     return dominant_mood, confidence
 
 
@@ -402,17 +421,18 @@ def check_mood_and_recommend(frame, face_bbox, eye_cascade, smile_cascade):
     print("\n" + "=" * 50)
     print("MOOD CHECK")
     print("=" * 50)
-
+    
     mood, confidence = analyze_mood(frame, face_bbox, eye_cascade, smile_cascade)
     print(f"Detected mood: {mood.upper()} ({confidence:.0f}% confidence)")
-
+    
     playlist_name, playlist_url = recommend_playlist(mood)
     print(f"\nRECOMMENDATION: {playlist_name}")
     print(f"{playlist_url}")
     print("=" * 50 + "\n")
-
+    
+    # Publish mood and playlist to dashboard
     publish_mood(mood, playlist_name, playlist_url)
-
+    
     return mood
 
 
@@ -438,21 +458,44 @@ def lock_onto_person(cap, face_cascade, profile_cascade, upper_body_cascade):
             except Exception as e:
                 print(f"Tracker init error: {e}")
                 return None, bbox, w * h
-            ref_area_local = w * h
-            print(f"Reference area: {ref_area_local}")
+            ref_area = w * h
+            print(f"Reference area: {ref_area}")
             print("Tracking started!")
-            return tracker, bbox, ref_area_local
+            return tracker, bbox, ref_area
         time.sleep(0.1)
 
 
-# ============================================================================
-# MAIN TRACKING LOOP
-# ============================================================================
-def run_tracking():
-    global LAST_MOOD_CHECK, is_tracking, current_distance, current_pan, current_tilt, current_mood, manual_volume_override, auto_volume_enabled, ref_area, recalibrate_requested
+def release_camera():
+    """Kill any processes using the camera before we start."""
+    import os as _os
+    my_pid = str(_os.getpid())
+    try:
+        # Force release /dev/video0 (but not our own process)
+        result = subprocess.run(
+            ["sudo", "fuser", "/dev/video0"],
+            capture_output=True,
+            text=True
+        )
+        if result.stdout:
+            pids = result.stdout.strip().split()
+            for pid in pids:
+                if pid != my_pid:
+                    subprocess.run(["sudo", "kill", "-9", pid], 
+                                   stdout=subprocess.DEVNULL, 
+                                   stderr=subprocess.DEVNULL)
+        time.sleep(0.5)
+    except Exception as e:
+        print(f"[CAMERA] Cleanup warning: {e}")
 
-    LAST_MOOD_CHECK = time.time()
 
+def main():
+    global LAST_MOOD_CHECK, is_tracking, current_distance, current_pan, current_mood, manual_volume_override, auto_volume_enabled, ref_area, recalibrate_requested
+    
+    # Release camera from any other processes first
+    print("[CAMERA] Releasing camera from other processes...")
+    release_camera()
+    
+    # Open camera FIRST before anything else
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
@@ -460,10 +503,20 @@ def run_tracking():
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
     if not cap.isOpened():
-        print("[CAMERA] Could not open camera")
-        return
-
+        print("Could not open camera - trying again after reset...")
+        # Try once more after a brief wait
+        time.sleep(1)
+        cap = cv2.VideoCapture(0)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        if not cap.isOpened():
+            print("Could not open camera")
+            return
+    
     print("[CAMERA] Opened successfully")
+    
+    # Now setup MQTT after camera is working
+    setup_mqtt()
 
     face_cascade = cv2.CascadeClassifier(FACE_CASCADE)
     profile_cascade = cv2.CascadeClassifier(PROFILE_CASCADE)
@@ -490,6 +543,9 @@ def run_tracking():
     MAX_LOST_FRAMES = 45
     detect_interval = 3
     frame_count = 0
+    
+    LAST_MOOD_CHECK = time.time()
+    current_mood = "neutral"
 
     print(f"\nMood detection enabled - checking every {MOOD_CHECK_INTERVAL} seconds")
 
@@ -536,7 +592,7 @@ def run_tracking():
                         cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY),
                         scaleFactor=1.2,
                         minNeighbors=5,
-                        minSize=(50, 50),
+                        minSize=(50, 50)
                     )
                     if len(faces) > 0:
                         face_bbox = max(faces, key=lambda f: f[2] * f[3])
@@ -547,7 +603,7 @@ def run_tracking():
 
                 raw_error = center_x - cx
                 error_filtered = (1 - error_smooth) * error_filtered + error_smooth * raw_error
-
+                
                 error_deriv = error_filtered - prev_error
                 prev_error = error_filtered
 
@@ -583,11 +639,11 @@ def run_tracking():
                     vol_current = (1.0 - VOLUME_SMOOTH_ALPHA) * vol_current + VOLUME_SMOOTH_ALPHA * zone_vol
                     set_volume(vol_current)
 
+                print(f"pan={pan:.1f} dist={distance_ft:.1f}ft vol={vol_current:.0f}% mood={current_mood}")
+                
+                # Publish status to dashboard
                 if frame_count % 30 == 0:
                     publish_status()
-
-                print(f"pan={pan:.1f} dist={distance_ft:.1f}ft vol={vol_current:.0f}% mood={current_mood}")
-
             else:
                 lost_frames += 1
                 error_filtered *= 0.9
@@ -615,44 +671,6 @@ def run_tracking():
         mqtt_client.loop_stop()
         mqtt_client.disconnect()
     print("Stopped.")
-
-
-# ============================================================================
-# MAIN
-# ============================================================================
-def main():
-    global mqtt_client
-
-    print("=" * 60)
-    print("Pi 2 Agent - Starting")
-    print("=" * 60)
-
-    mqtt_client = mqtt.Client(client_id="pi2_agent")
-    mqtt_client.on_connect = on_mqtt_connect
-    mqtt_client.on_message = on_mqtt_message
-    mqtt_client.on_disconnect = on_mqtt_disconnect
-
-    mqtt_client.will_set(TOPIC_PI2_STATUS, json.dumps({"status": "offline", "timestamp": time.time()}))
-
-    try:
-        print(f"[MQTT] Connecting to {MQTT_BROKER}:{MQTT_PORT}...")
-        mqtt_client.connect(MQTT_BROKER, MQTT_PORT, MQTT_KEEPALIVE)
-        mqtt_client.loop_start()
-    except Exception as e:
-        print(f"[MQTT] Failed to connect: {e}")
-        print("[MQTT] Running offline")
-
-    set_volume(VOL_FAR)
-
-    try:
-        run_tracking()
-    except KeyboardInterrupt:
-        print("\n[MAIN] Shutting down...")
-    finally:
-        publish_status()
-        mqtt_client.loop_stop()
-        mqtt_client.disconnect()
-        print("[MAIN] Goodbye!")
 
 
 if __name__ == "__main__":

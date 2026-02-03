@@ -42,13 +42,27 @@ except Exception:
 
 
 # ============================================================================
-# CONFIGURATION - MQTT
+# CONFIGURATION - EDIT config.py OR SET ENVIRONMENT VARIABLES
 # ============================================================================
-#CHANGES BASED ON DEVICE
-_default_host = f"Leahs-MacBook-Pro.local"
-MQTT_BROKER = os.environ.get("MQTT_BROKER", _default_host)
-MQTT_PORT = 1883
-MQTT_KEEPALIVE = 60
+# To configure for a new computer, either:
+#   1. Edit config.py (recommended)
+#   2. Set environment variables:
+#      export MQTT_BROKER="your-computer.local"
+#      export IMU_MAC="XX:XX:XX:XX:XX:XX"
+# ============================================================================
+try:
+    from config import (
+        MQTT_BROKER, MQTT_PORT, MQTT_KEEPALIVE,
+        IMU_MAC_ADDRESS, CHAR_NOTIFY_PRIMARY, CHAR_NOTIFY_FALLBACK
+    )
+except ImportError:
+    # Fallback if config.py doesn't exist
+    MQTT_BROKER = os.environ.get("MQTT_BROKER", "Drews-MacBook-Pro.local")  # <-- CHANGE THIS
+    MQTT_PORT = 1883
+    MQTT_KEEPALIVE = 60
+    IMU_MAC_ADDRESS = os.environ.get("IMU_MAC", "D9:41:48:15:5E:FB")  # <-- CHANGE THIS
+    CHAR_NOTIFY_PRIMARY = "0000ffe4-0000-1000-8000-00805f9a34fb"
+    CHAR_NOTIFY_FALLBACK = "0000ffe9-0000-1000-8000-00805f9a34fb"
 
 TOPIC_GESTURES = "home/gestures"
 TOPIC_PI1_STATUS = "home/pi1/status"
@@ -268,9 +282,8 @@ async def dispatch_commands():
 # ============================================================================
 # IMU GESTURE DETECTION (based on your original IMU code)
 # ============================================================================
-IMU_MAC = "D9:41:48:15:5E:FB"
-CHAR_NOTIFY_PRIMARY = "0000ffe4-0000-1000-8000-00805f9a34fb"
-CHAR_NOTIFY_FALLBACK = "0000ffe9-0000-1000-8000-00805f9a34fb"
+# IMU settings loaded from config.py
+IMU_MAC = IMU_MAC_ADDRESS
 
 MODE_IDLE = "IDLE"
 MODE_COMMAND = "COMMAND"
