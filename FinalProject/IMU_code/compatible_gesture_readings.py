@@ -7,9 +7,6 @@ from collections import deque
 import threading
 from bleak import BleakClient
 
-# LED feedback (your file defines flash_green)
-from led_feedback import flash_green
-
 IMU_MAC = "D9:41:48:15:5E:FB"
 CHAR_NOTIFY_PRIMARY = "0000ffe4-0000-1000-8000-00805f9a34fb"
 CHAR_NOTIFY_FALLBACK = "0000ffe9-0000-1000-8000-00805f9a34fb"
@@ -17,32 +14,25 @@ CHAR_NOTIFY_FALLBACK = "0000ffe9-0000-1000-8000-00805f9a34fb"
 MODE_IDLE = "IDLE"
 MODE_COMMAND = "COMMAND"
 
-# ---------- Wake / Cancel: DOUBLE FLICK ----------
 FLICK_GMAG_THR_DPS = 750.0
 FLICK_REFRACTORY_S = 0.20
 FLICK_PEAK_WINDOW_S = 0.25
 
 DOUBLE_FLICK_REQUIRED = 2
-DOUBLE_FLICK_MAX_SPAN_S = 0.85  # time from 1st->2nd flick
+DOUBLE_FLICK_MAX_SPAN_S = 0.85
 
-# ---------- Command timing ----------
 COMMAND_TIMEOUT_S = 5.0
-COMMAND_READY_DELAY_S = 1.25       # initial arm delay
-REARM_READY_DELAY_S = 0.8          # shorter delay when re-armed
+COMMAND_READY_DELAY_S = 1.25
+REARM_READY_DELAY_S = 0.8
 POST_COMMAND_COOLDOWN_S = 0.40
-
-# Delay before re-arming command mode after a gesture (briefly returns to IDLE first)
 REARM_IDLE_S = 0.25
 
-# ---------- History ----------
 GESTURE_WINDOW_S = 0.60
 HIST_KEEP_S = 2.0
 
-# ---------- Twist detection ----------
 TWIST_GY_THR_DPS = 180.0
-TWIST_RIGHT_IS_POSITIVE_GY = False  # you flipped this to fix labels
+TWIST_RIGHT_IS_POSITIVE_GY = False
 
-# ---------- Swipe detection (ACCEL Z delta during command mode) ----------
 SWIPE_DAZ_THR_G = 0.55
 SWIPE_TWIST_REJECT_GY_DPS = 260.0
 SWIPE_UP_IS_POSITIVE_DAZ = True
@@ -50,7 +40,7 @@ SWIPE_UP_IS_POSITIVE_DAZ = True
 DEBUG_COMMAND = False
 
 
-# ---------------- Controller-compatibility layer ----------------
+# -------- Controller compatibility layer --------
 _last_gesture_cmd = None
 _lock = threading.Lock()
 _thread = None
@@ -76,7 +66,7 @@ def _run_async():
     asyncio.run(main())
 
 
-# ---------------- BLE packet parsing ----------------
+# -------- BLE packet parsing --------
 def parse_wt901_packets(buf: bytearray):
     out = []
     i = 0
@@ -106,31 +96,25 @@ def mag3(x, y, z):
     return math.sqrt(x * x + y * y + z * z)
 
 
-# ---------------- Gesture Engine ----------------
+# -------- Gesture Engine --------
 class GestureEngine:
     def __init__(self):
         self.mode = MODE_IDLE
-
-        # history: (t, ax,ay,az, gx,gy,gz)
         self.hist = deque()
 
-        # flick bookkeeping
         self.flick_times = deque()
         self.last_flick_t = 0.0
 
-        # command bookkeeping
         self.cmd_start_t = 0.0
         self.last_cmd_t = 0.0
         self.ready_announced = False
         self.entered_via_rearm = False
 
-        # command-mode baseline for az deltas
         self.az0 = None
         self.az0_accum = 0.0
         self.az0_n = 0
         self.az0_target_n = 6
 
-        # re-arm support
         self.pending_rearm = False
         self.rearm_at_t = 0.0
 
@@ -247,7 +231,6 @@ class GestureEngine:
             print(f"[dbg] az0={self.az0:+.3f} daz_best={daz_best:+.3f} | gy_peak={gy_peak if gy_peak is not None else -1:+.1f}")
 
         if abs(daz_best) >= SWIPE_DAZ_THR_G:
-            flash_green()
             if SWIPE_UP_IS_POSITIVE_DAZ:
                 return "PAUSE" if daz_best > 0 else "PLAY"
             else:
@@ -315,11 +298,10 @@ class GestureEngine:
         return None
 
 
-# ---------------- BLE runner ----------------
+# -------- BLE runner --------
 async def run(client: BleakClient, notify_uuid: str, label: str):
     sample_queue: asyncio.Queue = asyncio.Queue(maxsize=800)
     buf = bytearray()
-
     engine = GestureEngine()
 
     def handler(_sender, data: bytearray):
@@ -332,13 +314,8 @@ async def run(client: BleakClient, notify_uuid: str, label: str):
                 except asyncio.QueueFull:
                     pass
 
-    print(f"\n[{label}] Subscribing to notifications on {notify_uuid} ...")
     await client.start_notify(notify_uuid, handler)
     await asyncio.sleep(2.0)
-
-    print("\nIDLE: DOUBLE FLICK to arm command mode.")
-    print("COMMAND: one of {NEXT_TRACK, PREV_TRACK, PAUSE, PLAY}.")
-    print("COMMAND: DOUBLE FLICK again cancels.\n")
 
     try:
         while True:
@@ -349,25 +326,10 @@ async def run(client: BleakClient, notify_uuid: str, label: str):
             engine.push(ax, ay, az, gx, gy, gz)
             evt = await engine.step()
 
-            if evt == "ENTER_COMMAND_MODE":
-                print(f"\n>>> COMMAND MODE ARMED <<<")
-                print(f"    Waiting {COMMAND_READY_DELAY_S:.2f}s... then do ONE gesture.")
-            elif evt == "REENTER_COMMAND_MODE":
-                print(f"\n>>> COMMAND MODE RE-ARMED <<<")
-                print(f"    Waiting {REARM_READY_DELAY_S:.2f}s... then do ONE gesture.")
-            elif evt == "READY_FOR_GESTURE":
-                print("\n>>> READY: do your gesture now! <<<")
-            elif evt == "CANCEL_TO_IDLE":
-                print("\n>>> CANCELLED -> Back to IDLE mode <<<")
-            elif evt == "COMMAND_TIMEOUT":
-                print("\n>>> TIMEOUT -> Back to IDLE mode <<<")
-            elif evt in ("NEXT_TRACK", "PREV_TRACK", "PAUSE", "PLAY"):
+            if evt in ("NEXT_TRACK", "PREV_TRACK", "PAUSE", "PLAY"):
                 global _last_gesture_cmd
                 with _lock:
                     _last_gesture_cmd = evt
-
-                print(f"\nGESTURE: {evt}")
-                print(">>> Back to IDLE mode <<<")
 
     finally:
         try:
@@ -377,15 +339,11 @@ async def run(client: BleakClient, notify_uuid: str, label: str):
 
 
 async def main():
-    print(f"Connecting to {IMU_MAC} ...")
     async with BleakClient(IMU_MAC) as client:
-        print("Connected.")
         try:
             await run(client, CHAR_NOTIFY_PRIMARY, "PRIMARY")
-        except Exception as e:
-            print(f"[PRIMARY] Error: {e}")
-        print("\nSwitching to fallback notify characteristic...\n")
-        await run(client, CHAR_NOTIFY_FALLBACK, "FALLBACK")
+        except Exception:
+            await run(client, CHAR_NOTIFY_FALLBACK, "FALLBACK")
 
 
 if __name__ == "__main__":
