@@ -13,12 +13,6 @@ import threading
 import time
 import speech_recognition as sr
 
-# Optional LED feedback (won't crash if missing or different signature)
-try:
-    from led_feedback import led_feedback
-except Exception:
-    led_feedback = None
-
 DEVICE_INDEX = 9
 SAMPLE_RATE = 48000
 CHUNK = 1024
@@ -74,20 +68,6 @@ def get_voice_command():
     return cmd
 
 
-def _emit_led_feedback():
-    if led_feedback is None:
-        return
-    try:
-        led_feedback()
-    except TypeError:
-        try:
-            led_feedback("green")
-        except Exception:
-            pass
-    except Exception:
-        pass
-
-
 def _voice_loop():
     global _last_voice_cmd
 
@@ -98,46 +78,39 @@ def _voice_loop():
         sample_rate=SAMPLE_RATE,
         chunk_size=CHUNK
     ) as source:
-        # quick ambient calibration
         r.adjust_for_ambient_noise(source, duration=1.0)
 
         while not _stop.is_set():
             try:
-                # timeout keeps this loop responsive / non-blocking-ish
                 audio = r.listen(source, timeout=0.5, phrase_time_limit=3.0)
 
                 try:
                     text = r.recognize_google(audio, language="en-US")
-                except sr.UnknownValueError:
-                    continue
-                except sr.RequestError:
+                except (sr.UnknownValueError, sr.RequestError):
                     continue
 
                 cmd = map_command(text)
-                if cmd is not None:
+                if cmd:
                     with _lock:
                         _last_voice_cmd = cmd
-                    _emit_led_feedback()
 
             except sr.WaitTimeoutError:
                 continue
             except Exception:
-                # don't ever let the thread die
                 time.sleep(0.05)
 
 
-# Optional: run standalone for testing
 if __name__ == "__main__":
-    print("Voice listener test. Speak commands. Ctrl+C to exit.")
+    print("Voice test. Ctrl+C to exit.")
     start_voice_listener()
     try:
         while True:
             c = get_voice_command()
-            if c is not None:
+            if c:
                 print("VOICE:", c)
             time.sleep(0.02)
     except KeyboardInterrupt:
         pass
     finally:
         stop_voice_listener()
-        print("Stopped.")
+
