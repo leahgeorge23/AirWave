@@ -74,14 +74,13 @@ def main():
             time.sleep(0.02)
             continue
 
-        # execute + confirm LED flash here
         match cmd:
             case "PREV_TRACK":
                 prev_track()
             case "NEXT_TRACK":
                 next_track()
             case "PAUSE":
-                    pause()
+                pause()
             case "PLAY":
                 play()
             case "VOL_UP":
@@ -89,6 +88,7 @@ def main():
             case "VOL_DOWN":
                 volume_down()
 
+        flash_green()
         time.sleep(0.05)
 
 
