@@ -1040,29 +1040,28 @@
         }
 
         function sendPanTilt(direction) {
-            const step = 15;
+            const step = 10;
 
             switch (direction) {
-                case 'left':
+                case 'right':
                     currentPanAngle = Math.min(90, currentPanAngle + step);
                     sendToPi2({ command: 'pan', angle: currentPanAngle });
                     break;
-                case 'right':
+                case 'left':
                     currentPanAngle = Math.max(-90, currentPanAngle - step);
                     sendToPi2({ command: 'pan', angle: currentPanAngle });
                     break;
-                case 'up':
+                case 'down':
                     currentTiltAngle = Math.min(90, currentTiltAngle + step);
                     sendToPi2({ command: 'tilt', angle: currentTiltAngle });
                     break;
-                case 'down':
+                case 'up':
                     currentTiltAngle = Math.max(-90, currentTiltAngle - step);
                     sendToPi2({ command: 'tilt', angle: currentTiltAngle });
                     break;
                 case 'center':
-                    currentPanAngle = 0;
-                    currentTiltAngle = 0;
-                    sendToPi2({ command: 'center' });
+                    currentTiltAngle = -90;
+                    sendToPi2({ command: 'center', angle: currentTiltAngle });
                     break;
             }
         }

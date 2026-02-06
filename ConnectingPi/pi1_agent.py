@@ -25,9 +25,10 @@ import struct
 import threading
 import time
 import math
+import queue  
+import traceback
 from collections import deque
-from asyncio import QueueEmpty
-
+import asyncio
 import paho.mqtt.client as mqtt
 
 # Voice mapping (your existing module)
@@ -79,8 +80,9 @@ led_enabled = False
 gesture_enabled = True
 voice_enabled = False
 
-voice_cmd_queue: asyncio.Queue = asyncio.Queue()
-gesture_cmd_queue: asyncio.Queue = asyncio.Queue()
+voice_cmd_queue = None
+gesture_cmd_queue = None
+
 
 
 # ============================================================================
@@ -258,26 +260,29 @@ def publish_status(status):
 # COMMAND DISPATCHER (voice first, then gestures)
 # ============================================================================
 async def dispatch_commands():
-    """
-    Central dispatcher to enforce priority:
-      - Voice commands get published first
-      - Then gesture events
-    """
+    print("[DISPATCH] dispatcher started")
     while True:
         try:
-            voice_cmd = voice_cmd_queue.get_nowait()
-            publish_gesture(voice_cmd, "voice")
-            await asyncio.sleep(0)
-            continue
-        except QueueEmpty:
-            pass
+            try:
+                voice_cmd = voice_cmd_queue.get_nowait()
+                print(f"[DISPATCH] got voice cmd: {voice_cmd}")
+                publish_gesture(voice_cmd, "voice")
+                await asyncio.sleep(0)
+                continue
+            except asyncio.QueueEmpty:
+                pass
 
-        try:
-            gesture_cmd = await asyncio.wait_for(gesture_cmd_queue.get(), timeout=0.25)
-            publish_gesture(gesture_cmd, "gesture")
-        except asyncio.TimeoutError:
-            await asyncio.sleep(0.05)
+            try:
+                gesture_cmd = await asyncio.wait_for(gesture_cmd_queue.get(), timeout=0.25)
+                print(f"[DISPATCH] got gesture cmd: {gesture_cmd}")
+                publish_gesture(gesture_cmd, "gesture")
+            except asyncio.TimeoutError:
+                await asyncio.sleep(0.05)
 
+        except Exception as e:
+            print("[DISPATCH] CRASHED:", e)
+            traceback.print_exc()
+            await asyncio.sleep(1.0)  # keep it alive so we can see repeated failures
 
 # ============================================================================
 # IMU GESTURE DETECTION (based on your original IMU code)
@@ -309,7 +314,7 @@ HIST_KEEP_S = 2.0
 
 # ---------- Twist detection ----------
 TWIST_GY_THR_DPS = 180.0
-TWIST_RIGHT_IS_POSITIVE_GY = True
+TWIST_RIGHT_IS_POSITIVE_GY = False
 
 # ---------- Swipe detection ----------
 SWIPE_DAZ_THR_G = 0.55
@@ -828,7 +833,11 @@ async def main():
         print("[MQTT] Running in offline mode")
 
     loop = asyncio.get_running_loop()
-
+    global voice_cmd_queue, gesture_cmd_queue
+    voice_cmd_queue = asyncio.Queue()
+    gesture_cmd_queue = asyncio.Queue()
+    print("[DISPATCH] queues created on running loop")
+    
     # ---- Voice thread (optional) ----
     if VOICE_ENABLED_AT_START:
         voice_thread = threading.Thread(target=run_voice_detection, args=(loop,), daemon=True)
@@ -839,11 +848,15 @@ async def main():
     # ---- Dispatcher (voice priority) ----
     dispatcher_task = asyncio.create_task(dispatch_commands())
 
-    # ---- IMU gesture detection (async, like your original) ----
     try:
-        await run_gesture_detection()
+        while True:
+            await run_gesture_detection()
+            print("[IMU] gesture task ended; retrying in 2s...")
+            await asyncio.sleep(2.0)
+
     except KeyboardInterrupt:
         print("\n[MAIN] Shutting down...")
+
     finally:
         dispatcher_task.cancel()
         try:

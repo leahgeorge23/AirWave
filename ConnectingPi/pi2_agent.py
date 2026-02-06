@@ -9,6 +9,7 @@ import random
 import threading
 import json
 import shutil
+import os
 import paho.mqtt.client as mqtt
 
 # ============================================================================
@@ -58,6 +59,8 @@ current_volume = 100
 current_distance = 5.0
 current_pan = 0.0
 current_tilt = 0.0
+home_pan = 0.0
+home_tilt = 0.0
 is_tracking = False
 current_mood = "neutral"
 
@@ -83,6 +86,21 @@ error_smooth = 0.3
 MOOD_CHECK_INTERVAL = 15
 LAST_MOOD_CHECK = 0
 
+USE_DEEPFACE = 1
+DEEPFACE_MAX_SECONDS = 0.6
+DEEPFACE_AVAILABLE = False
+deepface_enabled = USE_DEEPFACE
+RESET_PAN_ON_EXIT = os.environ.get("RESET_PAN_ON_EXIT", "0") == "1"
+TILT_INVERT = 0
+PAN_INVERT = os.environ.get("PAN_INVERT", "1") == "1"
+
+if USE_DEEPFACE:
+    try:
+        from deepface import DeepFace
+        DEEPFACE_AVAILABLE = True
+    except Exception:
+        DEEPFACE_AVAILABLE = False
+
 # Cascade paths loaded from config.py
 FACE_CASCADE = FACE_CASCADE_PATH
 PROFILE_CASCADE = PROFILE_CASCADE_PATH
@@ -100,11 +118,6 @@ PLAYLISTS = {
         ("Sad Songs", "https://open.spotify.com/playlist/37i9dQZF1DX7qK8ma5wgG1"),
         ("Life Sucks", "https://open.spotify.com/playlist/37i9dQZF1DX3YSRoSdA634"),
         ("Melancholy", "https://open.spotify.com/playlist/37i9dQZF1DX64Y3du11rR1"),
-    ],
-    "energetic": [
-        ("Workout", "https://open.spotify.com/playlist/37i9dQZF1DX76Wlfdnj7AP"),
-        ("Power Workout", "https://open.spotify.com/playlist/37i9dQZF1DX70RN3TfWWJh"),
-        ("Beast Mode", "https://open.spotify.com/playlist/37i9dQZF1DX76Wlfdnj7AP"),
     ],
     "calm": [
         ("Peaceful Piano", "https://open.spotify.com/playlist/37i9dQZF1DX4sWSpwq3LiO"),
@@ -189,12 +202,12 @@ def on_mqtt_message(client, userdata, msg):
             elif command == "tilt":
                 angle = payload.get("angle", 0)
                 current_tilt = max(-90, min(90, angle))
-                pantilthat.tilt(current_tilt)
+                pantilthat.tilt(apply_tilt(current_tilt))
             elif command == "center":
-                current_pan = 0
-                current_tilt = 0
-                pantilthat.pan(0)
-                pantilthat.tilt(0)
+                current_pan = home_pan
+                current_tilt = home_tilt
+                pantilthat.pan(home_pan)
+                pantilthat.tilt(apply_tilt(home_tilt))
             elif command == "recalibrate":
                 recalibrate_requested = True
                 print("[COMMAND] Recalibration requested")
@@ -408,7 +421,19 @@ def detect_person(frame, face_cascade, profile_cascade, upper_body_cascade):
     return None
 
 
-def analyze_mood(frame, face_bbox, eye_cascade, smile_cascade):
+def map_deepface_emotion(emotion):
+    if emotion == "happy":
+        return "happy"
+    if emotion == "surprise":
+        return "happy"
+    if emotion in ("sad", "angry", "fear", "disgust"):
+        return "sad"
+    if emotion == "neutral":
+        return "calm"
+    return "calm"
+
+
+def analyze_mood_heuristic(frame, face_bbox, eye_cascade, smile_cascade):
     x, y, w, h = [int(v) for v in face_bbox]
     x = max(0, x)
     y = max(0, y)
@@ -435,12 +460,11 @@ def analyze_mood(frame, face_bbox, eye_cascade, smile_cascade):
     b, g, r = cv2.split(face_color)
     warmth = np.mean(r) - np.mean(b)
     
-    mood_scores = {"happy": 0, "sad": 0, "energetic": 0, "calm": 0, "neutral": 0}
+    mood_scores = {"happy": 0, "sad": 0, "calm": 0, "neutral": 0}
 
     # Smile is the strongest happy signal in your calibration set
     if has_smile:
         mood_scores["happy"] += 4
-        mood_scores["energetic"] += 1
     else:
         mood_scores["sad"] += 2
         mood_scores["calm"] += 1
@@ -449,23 +473,18 @@ def analyze_mood(frame, face_bbox, eye_cascade, smile_cascade):
     if brightness < 68:
         mood_scores["sad"] += 2
     elif brightness > 82:
-        mood_scores["happy"] += 1
-        mood_scores["energetic"] += 1
+        mood_scores["happy"] += 2
     else:
         mood_scores["calm"] += 1
 
-    # Contrast: higher tends to energetic, lower tends to sad
-    if contrast > 50:
-        mood_scores["energetic"] += 2
-    elif contrast < 42:
+    # Contrast: lower tends to sad, mid tends to calm
+    if contrast < 42:
         mood_scores["sad"] += 1
     else:
         mood_scores["calm"] += 1
 
     # Eyes: more eyes can indicate alertness, none can indicate calm
-    if eyes_detected >= 2:
-        mood_scores["energetic"] += 1
-    elif eyes_detected == 0:
+    if eyes_detected == 0:
         mood_scores["calm"] += 1
 
     # Warmth: higher skews happy, lower skews sad/calm in your data
@@ -482,6 +501,66 @@ def analyze_mood(frame, face_bbox, eye_cascade, smile_cascade):
     confidence = mood_scores[dominant_mood] / total * 100 if total > 0 else 0
     
     return dominant_mood, confidence
+
+
+def analyze_mood(frame, face_bbox, eye_cascade, smile_cascade):
+    global deepface_enabled
+    if deepface_enabled and DEEPFACE_AVAILABLE:
+        x, y, w, h = [int(v) for v in face_bbox]
+        x = max(0, x)
+        y = max(0, y)
+        w = min(frame.shape[1] - x, w)
+        h = min(frame.shape[0] - y, h)
+        face_color = frame[y:y + h, x:x + w]
+        try:
+            start = time.time()
+            result = DeepFace.analyze(
+                face_color,
+                actions=["emotion"],
+                enforce_detection=False
+            )
+            if isinstance(result, list) and result:
+                result = result[0]
+            emotion = result.get("dominant_emotion") if isinstance(result, dict) else None
+            if emotion:
+                mood = map_deepface_emotion(emotion)
+                duration = time.time() - start
+                if duration > DEEPFACE_MAX_SECONDS:
+                    deepface_enabled = False
+                    print(f"[MOOD] DeepFace slow ({duration:.2f}s); falling back to heuristic")
+                return mood, 100
+        except Exception as e:
+            print(f"[MOOD] DeepFace error, using heuristic: {e}")
+    return analyze_mood_heuristic(frame, face_bbox, eye_cascade, smile_cascade)
+
+
+def get_current_pan_tilt():
+    """Best-effort read of current pan/tilt to avoid snapping on start."""
+    try:
+        return float(pantilthat.get_pan()), float(pantilthat.get_tilt())
+    except Exception:
+        return 0.0, 0.0
+
+
+def normalize_tilt(physical_tilt):
+    return -physical_tilt if TILT_INVERT else physical_tilt
+
+
+def apply_tilt(tilt_angle):
+    return -tilt_angle if TILT_INVERT else tilt_angle
+
+
+def capture_home_position(sample_count=5, delay_s=0.05):
+    pans = []
+    tilts = []
+    for _ in range(sample_count):
+        pan, tilt = get_current_pan_tilt()
+        pans.append(pan)
+        tilts.append(tilt)
+        time.sleep(delay_s)
+    avg_pan = sum(pans) / len(pans)
+    avg_tilt = sum(tilts) / len(tilts)
+    return avg_pan, normalize_tilt(avg_tilt)
 
 
 def recommend_playlist(mood):
@@ -603,7 +682,11 @@ def main():
     if not use_tracker:
         print("Falling back to detection-only mode (slower)")
 
-    pan = 0.0
+    pan, tilt = capture_home_position()
+    current_pan = pan
+    current_tilt = tilt
+    home_pan = pan
+    home_tilt = tilt
     error_filtered = 0.0
     prev_error = 0.0
     vol_current = VOL_FAR
@@ -682,6 +765,8 @@ def main():
                 if abs(error_filtered) > dead_zone:
                     delta = (error_filtered * Kp_pan) + (error_deriv * Kd_pan)
                     delta = max(-max_step, min(max_step, delta))
+                    if PAN_INVERT:
+                        delta = -delta
                     pan += delta
                     pan = max(-90.0, min(90.0, pan))
                     pantilthat.pan(pan)
@@ -737,7 +822,8 @@ def main():
         pass
 
     cap.release()
-    pantilthat.pan(0.0)
+    if RESET_PAN_ON_EXIT:
+        pantilthat.pan(0.0)
     if mqtt_client:
         publish_status()
         mqtt_client.loop_stop()
