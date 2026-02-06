@@ -8,6 +8,7 @@ import numpy as np
 import random
 import threading
 import json
+import shutil
 import paho.mqtt.client as mqtt
 
 # ============================================================================
@@ -29,8 +30,7 @@ try:
 except ImportError:
     # Fallback if config.py doesn't exist
     import os
-    MQTT_BROKER = os.environ.get("MQTT_BROKER", "Drews-MacBook-Pro.local")  # <-- CHANGE THIS
-    MQTT_PORT = 1883
+    MQTT_BROKER = "Leah-MacBook-Pro.local"
     MQTT_KEEPALIVE = 60
     BLUETOOTH_SPEAKER_MAC = os.environ.get("SPEAKER_MAC", "F8:7D:76:AA:A8:8C")  # <-- CHANGE THIS
     BLUETOOTH_SPEAKER_NAME = "A2DP"
@@ -70,6 +70,9 @@ BOUND_MID_FAR = 6.0
 VOLUME_SMOOTH_ALPHA = 0.3
 DIST_SMOOTH_ALPHA = 0.15
 MAX_DIST_STEP_FT = 0.5
+
+GESTURE_VOLUME_STEP = 5
+MEDIA_SEEK_SECONDS = 10
 
 Kp_pan = 0.02
 Kd_pan = 0.015
@@ -132,12 +135,37 @@ def on_mqtt_message(client, userdata, msg):
     try:
         payload = json.loads(msg.payload.decode())
         
-        if msg.topic == TOPIC_GESTURES:
+        if msg.topic in (TOPIC_GESTURES):
             gesture_type = payload.get("type", "")
+            if not gesture_type:
+                return
+            print(f"[GESTURE] Received: {gesture_type}")
             if gesture_type in ["SWIPE_UP", "VOL_UP"]:
-                adjust_volume(10)
+                adjust_volume(GESTURE_VOLUME_STEP)
+                print(f"[GESTURE] Action: volume +{GESTURE_VOLUME_STEP}")
             elif gesture_type in ["SWIPE_DOWN", "VOL_DOWN"]:
-                adjust_volume(-10)
+                adjust_volume(-GESTURE_VOLUME_STEP)
+                print(f"[GESTURE] Action: volume -{GESTURE_VOLUME_STEP}")
+            elif gesture_type == "NEXT_TRACK":
+                if media_next():
+                    print("[GESTURE] Action: next track/seek forward")
+                else:
+                    print("[GESTURE] Action failed: next track/seek forward")
+            elif gesture_type == "PREV_TRACK":
+                if media_previous():
+                    print("[GESTURE] Action: previous track/seek backward")
+                else:
+                    print("[GESTURE] Action failed: previous track/seek backward")
+            elif gesture_type == "PAUSE":
+                if media_pause():
+                    print("[GESTURE] Action: pause")
+                else:
+                    print("[GESTURE] Action failed: pause")
+            elif gesture_type == "PLAY":
+                if media_play():
+                    print("[GESTURE] Action: play")
+                else:
+                    print("[GESTURE] Action failed: play")
                 
         elif msg.topic == TOPIC_PI2_COMMANDS:
             command = payload.get("command", "")
@@ -220,6 +248,42 @@ def adjust_volume(delta):
         if manual_volume_override == new_vol:
             manual_volume_override = None
     threading.Thread(target=clear_override, daemon=True).start()
+
+
+def _run_playerctl(args):
+    if shutil.which("playerctl") is None:
+        print("[MEDIA] playerctl not found; cannot control playback")
+        return False
+    result = subprocess.run(
+        ["playerctl"] + args,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+    return result.returncode == 0
+
+
+def media_next():
+    if _run_playerctl(["next"]):
+        return True
+    return _run_playerctl(["position", f"{MEDIA_SEEK_SECONDS}+"])
+
+
+def media_previous():
+    if _run_playerctl(["previous"]):
+        return True
+    return _run_playerctl(["position", f"{MEDIA_SEEK_SECONDS}-"])
+
+
+def media_pause():
+    if _run_playerctl(["pause"]):
+        return True
+    return _run_playerctl(["play-pause"])
+
+
+def media_play():
+    if _run_playerctl(["play"]):
+        return True
+    return _run_playerctl(["play-pause"])
 
 def setup_mqtt():
     global mqtt_client
@@ -639,7 +703,7 @@ def main():
                     vol_current = (1.0 - VOLUME_SMOOTH_ALPHA) * vol_current + VOLUME_SMOOTH_ALPHA * zone_vol
                     set_volume(vol_current)
 
-                print(f"pan={pan:.1f} dist={distance_ft:.1f}ft vol={vol_current:.0f}% mood={current_mood}")
+                #print(f"pan={pan:.1f} dist={distance_ft:.1f}ft vol={vol_current:.0f}% mood={current_mood}")
                 
                 # Publish status to dashboard
                 if frame_count % 30 == 0:

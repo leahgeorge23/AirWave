@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+\<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -651,7 +651,7 @@
         // ============================================================
         
         // ⬇️ CHANGE THIS to your MQTT broker address ⬇️
-        const MQTT_HOST = 'Drews-MacBook-Pro.local';  // <-- CHANGE THIS (e.g., '192.168.1.100' or 'your-mac.local')
+        const MQTT_HOST = 'Leahs-MacBook-Pro.local';  // <-- CHANGE THIS (e.g., '192.168.1.100' or 'your-mac.local')
         const MQTT_WS_PORT = 9001;      // WebSocket port (usually 9001)
         
         const MQTT_BROKER = `ws://${MQTT_HOST}:${MQTT_WS_PORT}`;
@@ -770,8 +770,8 @@
 
         function handleGesture(payload) {
             const gestureIcons = {
-                'SWIPE_UP': '👆',
-                'SWIPE_DOWN': '👇',
+                'SWIPE_UP': '⏸️',
+                'SWIPE_DOWN': '▶️',
                 'TWIST_RIGHT': '🔄',
                 'TWIST_LEFT': '🔃',
                 'VOL_UP': '🔊',
@@ -782,8 +782,14 @@
                 'PAUSE': '⏸️'
             };
 
+            const displayType = payload.type === 'SWIPE_UP'
+                ? 'PAUSE'
+                : payload.type === 'SWIPE_DOWN'
+                    ? 'PLAY'
+                    : payload.type;
+
             const gesture = {
-                type: payload.type,
+                type: displayType,
                 source: payload.source,
                 icon: gestureIcons[payload.type] || '👋',
                 time: new Date().toLocaleTimeString()

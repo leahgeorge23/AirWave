@@ -57,7 +57,7 @@ try:
     )
 except ImportError:
     # Fallback if config.py doesn't exist
-    MQTT_BROKER = os.environ.get("MQTT_BROKER", "Drews-MacBook-Pro.local")  # <-- CHANGE THIS
+    MQTT_BROKER = os.environ.get("MQTT_BROKER", "Leahs-MacBook-Pro.local")  # <-- CHANGE THIS
     MQTT_PORT = 1883
     MQTT_KEEPALIVE = 60
     IMU_MAC_ADDRESS = os.environ.get("IMU_MAC", "D9:41:48:15:5E:FB")  # <-- CHANGE THIS

@@ -1,88 +1,1087 @@
-#!/usr/bin/env python3
-"""
-=============================================================================
-SHARED CONFIGURATION FILE
-=============================================================================
-Edit this file when transferring code to a new computer/setup.
-Both pi1_agent.py and pi2_agent.py import settings from here.
-=============================================================================
-"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pi Control Dashboard</title>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
-import os
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+            padding: 20px;
+        }
 
-# ============================================================================
-# MQTT BROKER SETTINGS
-# ============================================================================
-# Option 1: Set via environment variable (highest priority)
-#   export MQTT_BROKER="your-computer.local"
-#
-# Option 2: Edit this default value directly
-#   Change "YOUR-COMPUTER-NAME.local" to your computer's hostname
-#   Examples: "Drews-MacBook-Pro.local", "raspberrypi.local", "192.168.1.100"
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
 
-MQTT_BROKER_DEFAULT = "Drews-MacBook-Pro.local"  # <-- CHANGE THIS
-MQTT_BROKER = os.environ.get("MQTT_BROKER", MQTT_BROKER_DEFAULT)
-MQTT_PORT = 1883
-MQTT_KEEPALIVE = 60
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
 
-# ============================================================================
-# BLUETOOTH DEVICE SETTINGS (Pi 1 - IMU Sensor)
-# ============================================================================
-# The MAC address of your Bluetooth IMU sensor
-# Find it by running: bluetoothctl devices
+        .connection-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 20px;
+            font-size: 0.9rem;
+        }
 
-IMU_MAC_ADDRESS = "D9:41:48:15:5E:FB"  # <-- CHANGE THIS to your IMU's MAC
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ff4444;
+            animation: pulse 2s infinite;
+        }
 
-# BLE Characteristic UUIDs (usually don't need to change)
-CHAR_NOTIFY_PRIMARY = "0000ffe4-0000-1000-8000-00805f9a34fb"
-CHAR_NOTIFY_FALLBACK = "0000ffe9-0000-1000-8000-00805f9a34fb"
+        .status-dot.connected {
+            background: #00ff88;
+        }
 
-# ============================================================================
-# BLUETOOTH SPEAKER SETTINGS (Pi 2 - Audio Output)
-# ============================================================================
-# The MAC address and name of your Bluetooth speaker
-# Find it by running: bluetoothctl devices
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
 
-BLUETOOTH_SPEAKER_MAC = "F8:7D:76:AA:A8:8C"  # <-- CHANGE THIS to your speaker's MAC
-BLUETOOTH_SPEAKER_NAME = "A2DP"  # Usually "A2DP" for most speakers
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
 
-# ============================================================================
-# OPENCV CASCADE PATHS
-# ============================================================================
-# These are the default paths on Raspberry Pi OS
-# On other systems, you may need to update these paths
-# Common alternative: cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        .card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 16px;
+            padding: 24px;
+            border: 1px solid rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+        }
 
-import cv2
-_cascade_dir = "/usr/share/opencv/haarcascades/"
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
 
-# Try to use cv2.data.haarcascades if available (works on most systems)
-try:
-    if hasattr(cv2, 'data') and cv2.data.haarcascades:
-        _cascade_dir = cv2.data.haarcascades
-except:
-    pass
+        .card-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
 
-FACE_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_frontalface_default.xml")
-PROFILE_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_profileface.xml")
-UPPER_BODY_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_upperbody.xml")
-EYE_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_eye.xml")
-SMILE_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_smile.xml")
+        .card-title .icon {
+            font-size: 1.5rem;
+        }
 
-# ============================================================================
-# QUICK SETUP INSTRUCTIONS
-# ============================================================================
-# 1. Find your computer's hostname:
-#    - Mac: System Preferences > Sharing > Computer Name
-#    - Linux: hostname
-#    - Or use IP address: ifconfig | grep "inet "
-#
-# 2. Find Bluetooth devices:
-#    bluetoothctl
-#    devices
-#
-# 3. Set via environment variables (alternative to editing this file):
-#    export MQTT_BROKER="your-computer.local"
-#    export IMU_MAC="XX:XX:XX:XX:XX:XX"
-#    export SPEAKER_MAC="XX:XX:XX:XX:XX:XX"
-# ============================================================================
+        .pi-status {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        .pi-status.online {
+            background: rgba(0, 255, 136, 0.2);
+            color: #00ff88;
+        }
+
+        .pi-status.offline {
+            background: rgba(255, 68, 68, 0.2);
+            color: #ff4444;
+        }
+
+        /* Gesture Feed */
+        .gesture-feed {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .gesture-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 8px;
+            margin-bottom: 8px;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .gesture-icon {
+            font-size: 1.5rem;
+            width: 40px;
+            text-align: center;
+        }
+
+        .gesture-info {
+            flex: 1;
+        }
+
+        .gesture-type {
+            font-weight: 600;
+            color: #00d9ff;
+        }
+
+        .gesture-meta {
+            font-size: 0.8rem;
+            color: rgba(255,255,255,0.5);
+        }
+
+        /* Volume Control */
+        .volume-display {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .volume-value {
+            font-size: 4rem;
+            font-weight: 700;
+            background: linear-gradient(90deg, #00ff88, #00d9ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .volume-bar {
+            height: 20px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        .volume-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00ff88, #00d9ff);
+            border-radius: 10px;
+            transition: width 0.3s ease;
+        }
+
+        .volume-controls {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+
+        .volume-slider {
+            width: 100%;
+            margin: 15px 0;
+            -webkit-appearance: none;
+            height: 8px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+            outline: none;
+        }
+
+        .volume-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 24px;
+            height: 24px;
+            background: linear-gradient(135deg, #00ff88, #00d9ff);
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        /* Tracking Status */
+        .tracking-info {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-box {
+            background: rgba(255,255,255,0.03);
+            padding: 15px;
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            color: rgba(255,255,255,0.5);
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #00d9ff;
+        }
+
+        .stat-value.tracking {
+            color: #00ff88;
+        }
+
+        .stat-value.not-tracking {
+            color: #ff4444;
+        }
+
+        /* LED Control */
+        .led-controls {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .color-btn {
+            padding: 15px;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s;
+            color: #fff;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+        }
+
+        .color-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+        }
+
+        .color-btn.red { background: linear-gradient(135deg, #ff4444, #cc0000); }
+        .color-btn.green { background: linear-gradient(135deg, #00ff88, #00cc6a); }
+        .color-btn.blue { background: linear-gradient(135deg, #00d9ff, #0099cc); }
+        .color-btn.yellow { background: linear-gradient(135deg, #ffff00, #cccc00); color: #333; }
+        .color-btn.purple { background: linear-gradient(135deg, #aa00ff, #7700b3); }
+        .color-btn.off { background: linear-gradient(135deg, #444, #222); }
+
+        /* Buttons */
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #00d9ff, #0099cc);
+            color: #fff;
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #00ff88, #00cc6a);
+            color: #fff;
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #ff4444, #cc0000);
+            color: #fff;
+        }
+
+        .btn-secondary {
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+        }
+
+        .btn-lg {
+            padding: 16px 32px;
+            font-size: 1.1rem;
+        }
+
+        /* Toggle Switch */
+        .toggle-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .toggle-label {
+            font-weight: 500;
+        }
+
+        .toggle {
+            position: relative;
+            width: 50px;
+            height: 26px;
+        }
+
+        .toggle input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255,255,255,0.1);
+            border-radius: 26px;
+            transition: 0.3s;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            bottom: 3px;
+            background: #fff;
+            border-radius: 50%;
+            transition: 0.3s;
+        }
+
+        .toggle input:checked + .toggle-slider {
+            background: linear-gradient(135deg, #00ff88, #00cc6a);
+        }
+
+        .toggle input:checked + .toggle-slider:before {
+            transform: translateX(24px);
+        }
+
+        /* Pan-Tilt Control */
+        .pantilt-control {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .pantilt-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .pantilt-btn {
+            width: 50px;
+            height: 50px;
+            border: none;
+            border-radius: 12px;
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+            font-size: 1.5rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .pantilt-btn:hover {
+            background: rgba(0, 217, 255, 0.3);
+        }
+
+        .pantilt-btn.center {
+            background: linear-gradient(135deg, #00d9ff, #0099cc);
+        }
+
+        /* Log Area */
+        .log-area {
+            background: rgba(0,0,0,0.3);
+            border-radius: 8px;
+            padding: 15px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.85rem;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .log-entry {
+            padding: 4px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .log-time {
+            color: rgba(255,255,255,0.4);
+            margin-right: 10px;
+        }
+
+        .log-topic {
+            color: #00d9ff;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .dashboard {
+                grid-template-columns: 1fr;
+            }
+            
+            .header h1 {
+                font-size: 1.8rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🎮 Pi Control Dashboard</h1>
+        <div class="connection-status">
+            <div class="status-dot" id="mqttStatus"></div>
+            <span id="mqttStatusText">Connecting...</span>
+        </div>
+    </div>
+
+    <div class="dashboard">
+        <!-- Pi 1: Gesture & LED Control -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">
+                    <span class="icon">🤖</span>
+                    Pi 1 - Gestures & LEDs
+                </div>
+                <span class="pi-status offline" id="pi1Status">Offline</span>
+            </div>
+
+            <h3 style="margin-bottom: 15px;">Recent Gestures</h3>
+            <div class="gesture-feed" id="gestureFeed">
+                <div class="gesture-item" style="color: rgba(255,255,255,0.5);">
+                    Waiting for gestures...
+                </div>
+            </div>
+
+            <h3 style="margin: 20px 0 15px;">LED Control</h3>
+            <div class="led-controls">
+                <button class="color-btn red" onclick="sendLedColor(255, 0, 0)">Red</button>
+                <button class="color-btn green" onclick="sendLedColor(0, 255, 0)">Green</button>
+                <button class="color-btn blue" onclick="sendLedColor(0, 0, 255)">Blue</button>
+                <button class="color-btn yellow" onclick="sendLedColor(255, 255, 0)">Yellow</button>
+                <button class="color-btn purple" onclick="sendLedColor(170, 0, 255)">Purple</button>
+                <button class="color-btn off" onclick="sendLedOff()">Off</button>
+            </div>
+
+            <h3 style="margin: 20px 0 15px;">Settings</h3>
+            <div class="toggle-row">
+                <span class="toggle-label">Gesture Detection</span>
+                <label class="toggle">
+                    <input type="checkbox" id="gestureEnabled" checked onchange="toggleGesture()">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <div class="toggle-row">
+                <span class="toggle-label">Voice Commands</span>
+                <label class="toggle">
+                    <input type="checkbox" id="voiceEnabled" checked onchange="toggleVoice()">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <div class="toggle-row">
+                <span class="toggle-label">LED Feedback</span>
+                <label class="toggle">
+                    <input type="checkbox" id="ledEnabled" checked onchange="toggleLed()">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Pi 2: Volume & Tracking -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">
+                    <span class="icon">🔊</span>
+                    Pi 2 - Volume & Tracking
+                </div>
+                <span class="pi-status offline" id="pi2Status">Offline</span>
+            </div>
+
+            <div class="volume-display">
+                <div class="volume-value" id="volumeValue">--</div>
+                <div style="color: rgba(255,255,255,0.5);">Volume %</div>
+            </div>
+
+            <div class="volume-bar">
+                <div class="volume-fill" id="volumeBar" style="width: 0%"></div>
+            </div>
+
+            <input type="range" class="volume-slider" id="volumeSlider" 
+                   min="0" max="100" value="50" oninput="setVolume(this.value)">
+
+            <div class="volume-controls">
+                <button class="btn btn-secondary" onclick="adjustVolume(-10)">🔉 -10</button>
+                <button class="btn btn-secondary" onclick="adjustVolume(-5)">-5</button>
+                <button class="btn btn-secondary" onclick="adjustVolume(5)">+5</button>
+                <button class="btn btn-secondary" onclick="adjustVolume(10)">🔊 +10</button>
+            </div>
+
+            <h3 style="margin: 25px 0 15px;">Tracking Status</h3>
+            <div class="tracking-info">
+                <div class="stat-box">
+                    <div class="stat-label">Status</div>
+                    <div class="stat-value" id="trackingStatus">--</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Distance</div>
+                    <div class="stat-value" id="distanceValue">-- ft</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Pan Angle</div>
+                    <div class="stat-value" id="panAngle">--°</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Tilt Angle</div>
+                    <div class="stat-value" id="tiltAngle">--°</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Auto Volume</div>
+                    <div class="stat-value" id="autoVolumeStatus">--</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Mood</div>
+                    <div class="stat-value" id="moodValue">--</div>
+                </div>
+            </div>
+
+            <!-- Mood & Playlist Section -->
+            <div id="moodSection" style="display: none; margin-top: 20px;">
+                <h3 style="margin-bottom: 15px;">🎵 Mood-Based Playlist</h3>
+                <div style="background: rgba(255,255,255,0.05); border-radius: 12px; padding: 20px;">
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <div id="moodEmoji" style="font-size: 3rem;">😐</div>
+                        <div style="flex: 1;">
+                            <div style="font-size: 1.2rem; font-weight: 600; color: #00d9ff; margin-bottom: 5px;" id="moodLabel">Detecting mood...</div>
+                            <div style="color: rgba(255,255,255,0.6); font-size: 0.9rem;" id="playlistName">--</div>
+                        </div>
+                        <a id="playlistLink" href="#" target="_blank" class="btn btn-success" style="text-decoration: none;">
+                            🎧 Open Playlist
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <h3 style="margin: 20px 0 15px;">Pan-Tilt Control</h3>
+            <div class="pantilt-control">
+                <button class="pantilt-btn" onclick="sendPanTilt('up')">↑</button>
+                <div class="pantilt-row">
+                    <button class="pantilt-btn" onclick="sendPanTilt('left')">←</button>
+                    <button class="pantilt-btn center" onclick="sendPanTilt('center')">⌂</button>
+                    <button class="pantilt-btn" onclick="sendPanTilt('right')">→</button>
+                </div>
+                <button class="pantilt-btn" onclick="sendPanTilt('down')">↓</button>
+            </div>
+
+            <div style="margin-top: 20px; text-align: center;">
+                <button class="btn btn-primary btn-lg" onclick="recalibrateDistance()" style="width: 100%;">
+                    📏 Recalibrate Distance
+                </button>
+                <div style="color: rgba(255,255,255,0.5); font-size: 0.8rem; margin-top: 8px;">
+                    Stand at your preferred reference distance (5 ft) and click to calibrate
+                </div>
+            </div>
+
+            <h3 style="margin: 25px 0 15px;">Settings</h3>
+            <div class="toggle-row">
+                <span class="toggle-label">Face Tracking</span>
+                <label class="toggle">
+                    <input type="checkbox" id="trackingEnabled" checked onchange="toggleTracking()">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <div class="toggle-row">
+                <span class="toggle-label">Auto Volume</span>
+                <label class="toggle">
+                    <input type="checkbox" id="autoVolumeEnabled" checked onchange="toggleAutoVolume()">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <!-- MQTT Log -->
+        <div class="card" style="grid-column: 1 / -1;">
+            <div class="card-header">
+                <div class="card-title">
+                    <span class="icon">📡</span>
+                    MQTT Message Log
+                </div>
+                <button class="btn btn-secondary" onclick="clearLog()">Clear</button>
+            </div>
+            <div class="log-area" id="mqttLog">
+                <div class="log-entry">Waiting for messages...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================================
+        // CONFIGURATION - EDIT THESE WHEN TRANSFERRING TO NEW COMPUTER
+        // ============================================================
+        // Option 1: Use localhost (if MQTT broker runs on same machine as browser)
+        // Option 2: Use your computer's IP address (e.g., '192.168.1.100')
+        // Option 3: Use your computer's hostname (e.g., 'your-computer.local')
+        //
+        // Note: MQTT WebSocket port is typically 9001 (not 1883)
+        // Make sure your MQTT broker has WebSockets enabled on port 9001
+        // ============================================================
+        
+        // ⬇️ CHANGE THIS to your MQTT broker address ⬇️
+        const MQTT_HOST = 'Drews-MacBook-Pro.local';  // <-- CHANGE THIS (e.g., '192.168.1.100' or 'your-mac.local')
+        const MQTT_WS_PORT = 9001;      // WebSocket port (usually 9001)
+        
+        const MQTT_BROKER = `ws://${MQTT_HOST}:${MQTT_WS_PORT}`;
+        
+        // Topics (usually don't need to change)
+        const TOPIC_GESTURES = 'home/gestures';
+        const TOPIC_PI1_STATUS = 'home/pi1/status';
+        const TOPIC_PI1_COMMANDS = 'home/pi1/commands';
+        const TOPIC_PI2_STATUS = 'home/pi2/status';
+        const TOPIC_PI2_COMMANDS = 'home/pi2/commands';
+        const TOPIC_MOOD = 'home/mood';
+
+        // ============================================================
+        // MQTT CONNECTION
+        // ============================================================
+        let client = null;
+        let pi1Online = false;
+        let pi2Online = false;
+        let currentVolume = 50;
+        let currentPanAngle = 0;
+        let currentTiltAngle = 0;
+        let gestureHistory = [];
+        const MAX_GESTURES = 10;
+
+        function connect() {
+            console.log('Connecting to MQTT broker:', MQTT_BROKER);
+            
+            client = mqtt.connect(MQTT_BROKER, {
+                clientId: 'dashboard_' + Math.random().toString(16).substr(2, 8),
+                clean: true,
+                reconnectPeriod: 3000
+            });
+
+            client.on('connect', () => {
+                console.log('Connected to MQTT broker');
+                updateConnectionStatus(true);
+                
+                // Subscribe to all relevant topics
+                client.subscribe([
+                    TOPIC_GESTURES,
+                    TOPIC_PI1_STATUS,
+                    TOPIC_PI2_STATUS,
+                    TOPIC_MOOD
+                ], (err) => {
+                    if (err) {
+                        console.error('Subscribe error:', err);
+                    } else {
+                        addLog('system', 'Subscribed to all topics');
+                    }
+                });
+
+                // Request status from both Pis
+                sendToPi1({ command: 'status' });
+                sendToPi2({ command: 'status' });
+            });
+
+            client.on('message', (topic, message) => {
+                try {
+                    const payload = JSON.parse(message.toString());
+                    handleMessage(topic, payload);
+                } catch (e) {
+                    console.error('Failed to parse message:', e);
+                }
+            });
+
+            client.on('error', (err) => {
+                console.error('MQTT error:', err);
+                updateConnectionStatus(false);
+            });
+
+            client.on('close', () => {
+                console.log('MQTT connection closed');
+                updateConnectionStatus(false);
+            });
+
+            client.on('reconnect', () => {
+                console.log('Reconnecting to MQTT...');
+                document.getElementById('mqttStatusText').textContent = 'Reconnecting...';
+            });
+        }
+
+        function updateConnectionStatus(connected) {
+            const dot = document.getElementById('mqttStatus');
+            const text = document.getElementById('mqttStatusText');
+            
+            if (connected) {
+                dot.classList.add('connected');
+                text.textContent = 'Connected';
+            } else {
+                dot.classList.remove('connected');
+                text.textContent = 'Disconnected';
+            }
+        }
+
+        // ============================================================
+        // MESSAGE HANDLING
+        // ============================================================
+        function handleMessage(topic, payload) {
+            addLog(topic, JSON.stringify(payload));
+
+            switch (topic) {
+                case TOPIC_GESTURES:
+                    handleGesture(payload);
+                    break;
+                case TOPIC_PI1_STATUS:
+                    handlePi1Status(payload);
+                    break;
+                case TOPIC_PI2_STATUS:
+                    handlePi2Status(payload);
+                    break;
+                case TOPIC_MOOD:
+                    handleMood(payload);
+                    break;
+            }
+        }
+
+        function handleGesture(payload) {
+            const gestureIcons = {
+                'SWIPE_UP': '👆',
+                'SWIPE_DOWN': '👇',
+                'TWIST_RIGHT': '🔄',
+                'TWIST_LEFT': '🔃',
+                'VOL_UP': '🔊',
+                'VOL_DOWN': '🔉',
+                'NEXT_TRACK': '⏭️',
+                'PREV_TRACK': '⏮️',
+                'PLAY': '▶️',
+                'PAUSE': '⏸️'
+            };
+
+            const gesture = {
+                type: payload.type,
+                source: payload.source,
+                icon: gestureIcons[payload.type] || '👋',
+                time: new Date().toLocaleTimeString()
+            };
+
+            gestureHistory.unshift(gesture);
+            if (gestureHistory.length > MAX_GESTURES) {
+                gestureHistory.pop();
+            }
+
+            updateGestureFeed();
+        }
+
+        function updateGestureFeed() {
+            const feed = document.getElementById('gestureFeed');
+            
+            if (gestureHistory.length === 0) {
+                feed.innerHTML = '<div class="gesture-item" style="color: rgba(255,255,255,0.5);">Waiting for gestures...</div>';
+                return;
+            }
+
+            feed.innerHTML = gestureHistory.map(g => `
+                <div class="gesture-item">
+                    <div class="gesture-icon">${g.icon}</div>
+                    <div class="gesture-info">
+                        <div class="gesture-type">${g.type}</div>
+                        <div class="gesture-meta">${g.source} • ${g.time}</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function handlePi1Status(payload) {
+            const status = document.getElementById('pi1Status');
+            
+            if (payload.status === 'offline') {
+                status.textContent = 'Offline';
+                status.classList.remove('online');
+                status.classList.add('offline');
+                pi1Online = false;
+            } else {
+                status.textContent = 'Online';
+                status.classList.remove('offline');
+                status.classList.add('online');
+                pi1Online = true;
+                
+                // Update toggle states
+                if (payload.gesture_enabled !== undefined) {
+                    document.getElementById('gestureEnabled').checked = payload.gesture_enabled;
+                }
+                if (payload.voice_enabled !== undefined) {
+                    document.getElementById('voiceEnabled').checked = payload.voice_enabled;
+                }
+                if (payload.led_enabled !== undefined) {
+                    document.getElementById('ledEnabled').checked = payload.led_enabled;
+                }
+            }
+        }
+
+        function handleMood(payload) {
+            const moodEmojis = {
+                'happy': '😊',
+                'sad': '😢',
+                'energetic': '⚡',
+                'calm': '😌',
+                'neutral': '😐'
+            };
+            
+            const moodColors = {
+                'happy': '#FFD700',
+                'sad': '#6495ED',
+                'energetic': '#FF6B6B',
+                'calm': '#98D8C8',
+                'neutral': '#B0B0B0'
+            };
+
+            const mood = payload.mood || 'neutral';
+            const playlistName = payload.playlist_name || 'Unknown';
+            const playlistUrl = payload.playlist_url || '#';
+
+            // Show mood section
+            document.getElementById('moodSection').style.display = 'block';
+            
+            // Update mood display
+            document.getElementById('moodEmoji').textContent = moodEmojis[mood] || '😐';
+            document.getElementById('moodLabel').textContent = mood.charAt(0).toUpperCase() + mood.slice(1) + ' Mood Detected';
+            document.getElementById('moodLabel').style.color = moodColors[mood] || '#00d9ff';
+            document.getElementById('moodValue').textContent = mood.charAt(0).toUpperCase() + mood.slice(1);
+            document.getElementById('moodValue').style.color = moodColors[mood] || '#00d9ff';
+            document.getElementById('playlistName').textContent = '🎵 ' + playlistName;
+            document.getElementById('playlistLink').href = playlistUrl;
+        }
+
+        function handlePi2Status(payload) {
+            const status = document.getElementById('pi2Status');
+            
+            if (payload.status === 'offline') {
+                status.textContent = 'Offline';
+                status.classList.remove('online');
+                status.classList.add('offline');
+                pi2Online = false;
+                return;
+            }
+
+            status.textContent = 'Online';
+            status.classList.remove('offline');
+            status.classList.add('online');
+            pi2Online = true;
+
+            // Update volume display
+            if (payload.volume !== undefined) {
+                currentVolume = payload.volume;
+                document.getElementById('volumeValue').textContent = Math.round(payload.volume);
+                document.getElementById('volumeBar').style.width = payload.volume + '%';
+                document.getElementById('volumeSlider').value = payload.volume;
+            }
+
+            // Update tracking status
+            if (payload.is_tracking !== undefined) {
+                const trackingEl = document.getElementById('trackingStatus');
+                if (payload.is_tracking) {
+                    trackingEl.textContent = 'Tracking';
+                    trackingEl.classList.add('tracking');
+                    trackingEl.classList.remove('not-tracking');
+                } else {
+                    trackingEl.textContent = 'Searching';
+                    trackingEl.classList.add('not-tracking');
+                    trackingEl.classList.remove('tracking');
+                }
+            }
+
+            if (payload.distance_ft !== undefined) {
+                document.getElementById('distanceValue').textContent = payload.distance_ft + ' ft';
+            }
+
+            if (payload.pan_angle !== undefined) {
+                currentPanAngle = payload.pan_angle;
+                document.getElementById('panAngle').textContent = payload.pan_angle + '°';
+            }
+
+            if (payload.tilt_angle !== undefined) {
+                currentTiltAngle = payload.tilt_angle;
+                document.getElementById('tiltAngle').textContent = payload.tilt_angle + '°';
+            }
+
+            if (payload.auto_volume_enabled !== undefined) {
+                document.getElementById('autoVolumeEnabled').checked = payload.auto_volume_enabled;
+                document.getElementById('autoVolumeStatus').textContent = 
+                    payload.manual_override ? 'Override' : (payload.auto_volume_enabled ? 'On' : 'Off');
+            }
+
+            if (payload.tracking_enabled !== undefined) {
+                document.getElementById('trackingEnabled').checked = payload.tracking_enabled;
+            }
+        }
+
+        // ============================================================
+        // SEND COMMANDS
+        // ============================================================
+        function sendToPi1(payload) {
+            if (client && client.connected) {
+                client.publish(TOPIC_PI1_COMMANDS, JSON.stringify(payload));
+            }
+        }
+
+        function sendToPi2(payload) {
+            if (client && client.connected) {
+                client.publish(TOPIC_PI2_COMMANDS, JSON.stringify(payload));
+            }
+        }
+
+        // Pi 1 Controls
+        function sendLedColor(r, g, b) {
+            sendToPi1({ command: 'led_flash', color: [r, g, b], duration: 0.5 });
+        }
+
+        function sendLedOff() {
+            sendToPi1({ command: 'led_off' });
+        }
+
+        function toggleGesture() {
+            const enabled = document.getElementById('gestureEnabled').checked;
+            sendToPi1({ command: 'gesture_enable', enabled: enabled });
+        }
+
+        function toggleVoice() {
+            const enabled = document.getElementById('voiceEnabled').checked;
+            sendToPi1({ command: 'voice_enable', enabled: enabled });
+        }
+
+        function toggleLed() {
+            const enabled = document.getElementById('ledEnabled').checked;
+            sendToPi1({ command: 'led_enable', enabled: enabled });
+        }
+
+        // Pi 2 Controls
+        function setVolume(value) {
+            currentVolume = parseInt(value);
+            document.getElementById('volumeValue').textContent = currentVolume;
+            document.getElementById('volumeBar').style.width = currentVolume + '%';
+            sendToPi2({ command: 'set_volume', level: currentVolume });
+        }
+
+        function adjustVolume(delta) {
+            currentVolume = Math.max(0, Math.min(100, currentVolume + delta));
+            document.getElementById('volumeValue').textContent = currentVolume;
+            document.getElementById('volumeBar').style.width = currentVolume + '%';
+            document.getElementById('volumeSlider').value = currentVolume;
+            sendToPi2({ command: 'set_volume', level: currentVolume });
+        }
+
+        function toggleTracking() {
+            const enabled = document.getElementById('trackingEnabled').checked;
+            sendToPi2({ command: 'tracking_enable', enabled: enabled });
+        }
+
+        function toggleAutoVolume() {
+            const enabled = document.getElementById('autoVolumeEnabled').checked;
+            sendToPi2({ command: 'auto_volume_enable', enabled: enabled });
+        }
+
+        function sendPanTilt(direction) {
+            const step = 15;
+
+            switch (direction) {
+                case 'left':
+                    currentPanAngle = Math.min(90, currentPanAngle + step);
+                    sendToPi2({ command: 'pan', angle: currentPanAngle });
+                    break;
+                case 'right':
+                    currentPanAngle = Math.max(-90, currentPanAngle - step);
+                    sendToPi2({ command: 'pan', angle: currentPanAngle });
+                    break;
+                case 'up':
+                    currentTiltAngle = Math.min(90, currentTiltAngle + step);
+                    sendToPi2({ command: 'tilt', angle: currentTiltAngle });
+                    break;
+                case 'down':
+                    currentTiltAngle = Math.max(-90, currentTiltAngle - step);
+                    sendToPi2({ command: 'tilt', angle: currentTiltAngle });
+                    break;
+                case 'center':
+                    currentPanAngle = 0;
+                    currentTiltAngle = 0;
+                    sendToPi2({ command: 'center' });
+                    break;
+            }
+        }
+
+        function recalibrateDistance() {
+            sendToPi2({ command: 'recalibrate' });
+            addLog('system', 'Sent recalibration request to Pi 2');
+        }
+
+        // ============================================================
+        // LOGGING
+        // ============================================================
+        function addLog(topic, message) {
+            const log = document.getElementById('mqttLog');
+            const time = new Date().toLocaleTimeString();
+            
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `
+                <span class="log-time">${time}</span>
+                <span class="log-topic">${topic}</span>: ${message}
+            `;
+            
+            // Remove "waiting" message if present
+            if (log.children.length === 1 && log.children[0].textContent.includes('Waiting')) {
+                log.innerHTML = '';
+            }
+            
+            log.insertBefore(entry, log.firstChild);
+            
+            // Keep only last 50 entries
+            while (log.children.length > 50) {
+                log.removeChild(log.lastChild);
+            }
+        }
+
+        function clearLog() {
+            document.getElementById('mqttLog').innerHTML = 
+                '<div class="log-entry">Log cleared</div>';
+        }
+
+        // ============================================================
+        // INITIALIZE
+        // ============================================================
+        connect();
+
+        // Periodically request status
+        setInterval(() => {
+            if (client && client.connected) {
+                sendToPi1({ command: 'status' });
+                sendToPi2({ command: 'status' });
+            }
+        }, 5000);
+    </script>
+</body>
+</html>
