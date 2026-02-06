@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pi Control Dashboard</title>
+    <title> 🌊 AirWave 🌊 </title>
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <style>
         * {
@@ -14,7 +14,7 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            background: #cfe9ff;
             min-height: 100vh;
             color: #fff;
             padding: 20px;
@@ -23,14 +23,20 @@
         .header {
             text-align: center;
             margin-bottom: 30px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
         }
 
         .header h1 {
             font-size: 2.5rem;
             margin-bottom: 10px;
-            background: linear-gradient(90deg, #00d9ff, #00ff88);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            color: #fff;
+            background: #16213e;
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 16px;
         }
 
         .connection-status {
@@ -38,7 +44,7 @@
             align-items: center;
             gap: 8px;
             padding: 8px 16px;
-            background: rgba(255,255,255,0.1);
+            background: #16213e;
             border-radius: 20px;
             font-size: 0.9rem;
         }
@@ -62,14 +68,28 @@
 
         .dashboard {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-template-rows: auto 1fr;
             gap: 20px;
             max-width: 1400px;
             margin: 0 auto;
+            align-items: start;
+            min-height: calc(100vh - 160px);
+        }
+
+        .card.pi2-card {
+            grid-row: span 2;
+        }
+
+        .card.mqtt-card {
+            grid-column: 1;
+            grid-row: 2;
+            overflow-y: auto;
+            max-height: 150%;
         }
 
         .card {
-            background: rgba(255,255,255,0.05);
+            background: #16213e;
             border-radius: 16px;
             padding: 24px;
             border: 1px solid rgba(255,255,255,0.1);
@@ -453,7 +473,7 @@
 </head>
 <body>
     <div class="header">
-        <h1>🎮 Pi Control Dashboard</h1>
+        <h1>🌊 AirWave</h1>
         <div class="connection-status">
             <div class="status-dot" id="mqttStatus"></div>
             <span id="mqttStatusText">Connecting...</span>
@@ -462,7 +482,7 @@
 
     <div class="dashboard">
         <!-- Pi 1: Gesture & LED Control -->
-        <div class="card">
+        <div class="card pi1-card">
             <div class="card-header">
                 <div class="card-title">
                     <span class="icon">🤖</span>
@@ -513,7 +533,7 @@
         </div>
 
         <!-- Pi 2: Volume & Tracking -->
-        <div class="card">
+        <div class="card pi2-card">
             <div class="card-header">
                 <div class="card-title">
                     <span class="icon">🔊</span>
@@ -628,7 +648,7 @@
         </div>
 
         <!-- MQTT Log -->
-        <div class="card" style="grid-column: 1 / -1;">
+        <div class="card mqtt-card">
             <div class="card-header">
                 <div class="card-title">
                     <span class="icon">📡</span>
