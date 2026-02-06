@@ -244,6 +244,10 @@
             margin-bottom: 20px;
         }
 
+        .imu-status {
+            grid-template-columns: 1fr;
+        }
+
         .stat-box {
             background: rgba(255,255,255,0.03);
             padding: 15px;
@@ -268,6 +272,10 @@
         }
 
         .stat-value.not-tracking {
+            color: #ff4444;
+        }
+
+        .stat-value.disconnected {
             color: #ff4444;
         }
 
@@ -489,6 +497,13 @@
                     Pi 1 - Gestures & LEDs
                 </div>
                 <span class="pi-status offline" id="pi1Status">Offline</span>
+            </div>
+
+            <h3 style="margin-bottom: 10px;">IMU Status</h3>
+            <div class="tracking-info imu-status">
+                <div class="stat-box">
+                    <div class="stat-value" id="imuModeValue">--</div>
+                </div>
             </div>
 
             <h3 style="margin-bottom: 15px;">Recent Gestures</h3>
@@ -871,17 +886,34 @@
 
         function handlePi1Status(payload) {
             const status = document.getElementById('pi1Status');
+            const imuModeEl = document.getElementById('imuModeValue');
             
             if (payload.status === 'offline') {
                 status.textContent = 'Offline';
                 status.classList.remove('online');
                 status.classList.add('offline');
                 pi1Online = false;
+                if (imuModeEl) {
+                    imuModeEl.textContent = 'Disconnected';
+                    imuModeEl.classList.add('disconnected');
+                }
             } else {
                 status.textContent = 'Online';
                 status.classList.remove('offline');
                 status.classList.add('online');
                 pi1Online = true;
+
+                if (imuModeEl) {
+                    const imuConnected = payload.imu_connected !== undefined ? payload.imu_connected : true;
+                    if (!imuConnected) {
+                        imuModeEl.textContent = 'Disconnected';
+                        imuModeEl.classList.add('disconnected');
+                    } else {
+                        const imuMode = payload.imu_mode || 'IDLE';
+                        imuModeEl.textContent = imuMode === 'COMMAND' ? 'Command Mode' : 'Idle Mode';
+                        imuModeEl.classList.remove('disconnected');
+                    }
+                }
                 
                 // Update toggle states
                 if (payload.gesture_enabled !== undefined) {

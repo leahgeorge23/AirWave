@@ -251,6 +251,8 @@ def publish_status(status):
             "led_enabled": led_enabled,
             "gesture_enabled": gesture_enabled,
             "voice_enabled": voice_enabled,
+            "imu_mode": imu_mode,
+            "imu_connected": imu_connected,
             "timestamp": time.time(),
         }
         mqtt_client.publish(TOPIC_PI1_STATUS, json.dumps(payload))
@@ -292,6 +294,8 @@ IMU_MAC = IMU_MAC_ADDRESS
 
 MODE_IDLE = "IDLE"
 MODE_COMMAND = "COMMAND"
+imu_mode = MODE_IDLE
+imu_connected = False
 
 # ---------- Wake / Cancel: DOUBLE FLICK ----------
 FLICK_GMAG_THR_DPS = 750.0
@@ -586,9 +590,12 @@ async def imu_run(client: "BleakClient", notify_uuid: str, label: str):
     Reads WT901 packets from notify UUID, decodes accel/gyro,
     feeds the GestureEngine, and queues recognized gestures.
     """
+    global imu_mode
     sample_queue: asyncio.Queue = asyncio.Queue(maxsize=800)
     buf = bytearray()
     engine = GestureEngine()
+    last_mode = engine.mode
+    imu_mode = engine.mode
 
     def handler(_sender, data: bytearray):
         buf.extend(data)
@@ -616,6 +623,11 @@ async def imu_run(client: "BleakClient", notify_uuid: str, label: str):
 
             engine.push(ax, ay, az, gx, gy, gz)
             evt = await engine.step()
+
+            if engine.mode != last_mode:
+                last_mode = engine.mode
+                imu_mode = engine.mode
+                publish_status("online")
 
             # If gestures disabled, keep engine running but skip publishes
             if evt and not gesture_enabled:
@@ -647,8 +659,11 @@ async def imu_run(client: "BleakClient", notify_uuid: str, label: str):
 
 async def run_gesture_detection():
     """Connects to IMU and runs primary notify UUID, then fallback on error."""
+    global imu_connected
     if not BLEAK_AVAILABLE:
         print("[IMU] Bleak not installed; gesture detection disabled")
+        imu_connected = False
+        publish_status("online")
         return
 
     print(f"[IMU] Connecting to {IMU_MAC}...")
@@ -657,6 +672,8 @@ async def run_gesture_detection():
         client = BleakClient(IMU_MAC)
         await client.connect()
         print("[IMU] Connected.")
+        imu_connected = True
+        publish_status("online")
 
         try:
             await imu_run(client, CHAR_NOTIFY_PRIMARY, "PRIMARY")
@@ -669,6 +686,8 @@ async def run_gesture_detection():
     except Exception as e:
         print(f"[IMU] Connection error: {e}")
     finally:
+        imu_connected = False
+        publish_status("online")
         if client is not None:
             try:
                 await client.disconnect()
