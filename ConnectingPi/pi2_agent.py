@@ -80,7 +80,7 @@ dead_zone = 10.0
 max_step = 3.0
 error_smooth = 0.3
 
-MOOD_CHECK_INTERVAL = 60
+MOOD_CHECK_INTERVAL = 15
 LAST_MOOD_CHECK = 0
 
 # Cascade paths loaded from config.py
@@ -436,38 +436,46 @@ def analyze_mood(frame, face_bbox, eye_cascade, smile_cascade):
     warmth = np.mean(r) - np.mean(b)
     
     mood_scores = {"happy": 0, "sad": 0, "energetic": 0, "calm": 0, "neutral": 0}
-    
+
+    # Smile is the strongest happy signal in your calibration set
     if has_smile:
-        mood_scores["happy"] += 3
+        mood_scores["happy"] += 4
         mood_scores["energetic"] += 1
     else:
-        mood_scores["sad"] += 1
+        mood_scores["sad"] += 2
         mood_scores["calm"] += 1
-    
-    if brightness > 140:
+
+    # Brightness bands tuned to your calibration (sad lower, happy/energetic higher)
+    if brightness < 68:
+        mood_scores["sad"] += 2
+    elif brightness > 82:
         mood_scores["happy"] += 1
         mood_scores["energetic"] += 1
-    elif brightness < 100:
-        mood_scores["sad"] += 1
+    else:
         mood_scores["calm"] += 1
-    
+
+    # Contrast: higher tends to energetic, lower tends to sad
     if contrast > 50:
-        mood_scores["energetic"] += 1
-        mood_scores["happy"] += 1
+        mood_scores["energetic"] += 2
+    elif contrast < 42:
+        mood_scores["sad"] += 1
     else:
-        mood_scores["calm"] += 2
-    
+        mood_scores["calm"] += 1
+
+    # Eyes: more eyes can indicate alertness, none can indicate calm
     if eyes_detected >= 2:
         mood_scores["energetic"] += 1
-        mood_scores["happy"] += 1
-    elif eyes_detected < 2:
+    elif eyes_detected == 0:
         mood_scores["calm"] += 1
+
+    # Warmth: higher skews happy, lower skews sad/calm in your data
+    if warmth > 75:
+        mood_scores["happy"] += 2
+    elif warmth < 60:
         mood_scores["sad"] += 1
-    
-    if warmth > 20:
-        mood_scores["happy"] += 1
-    elif warmth < 0:
-        mood_scores["sad"] += 1
+        mood_scores["calm"] += 1
+    else:
+        mood_scores["neutral"] += 1
     
     dominant_mood = max(mood_scores, key=mood_scores.get)
     total = sum(mood_scores.values())
