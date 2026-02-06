@@ -567,6 +567,10 @@
                     <div class="stat-label">Mood</div>
                     <div class="stat-value" id="moodValue">--</div>
                 </div>
+                <div class="stat-box">
+                    <div class="stat-label">Next Mood Check</div>
+                    <div class="stat-value" id="moodCountdown">--s</div>
+                </div>
             </div>
 
             <!-- Mood & Playlist Section -->
@@ -675,6 +679,28 @@
         let currentTiltAngle = 0;
         let gestureHistory = [];
         const MAX_GESTURES = 10;
+        const MOOD_CHECK_INTERVAL = 15;
+        let moodCountdown = MOOD_CHECK_INTERVAL;
+        let moodCountdownTimer = null;
+        function startMoodCountdown() {
+            if (moodCountdownTimer) {
+                clearInterval(moodCountdownTimer);
+            }
+            moodCountdown = MOOD_CHECK_INTERVAL;
+            updateMoodCountdown();
+            moodCountdownTimer = setInterval(() => {
+                moodCountdown = Math.max(0, moodCountdown - 1);
+                updateMoodCountdown();
+            }, 1000);
+        }
+
+        function updateMoodCountdown() {
+            const el = document.getElementById('moodCountdown');
+            if (el) {
+                el.textContent = `${moodCountdown}s`;
+            }
+        }
+
 
         function connect() {
             console.log('Connecting to MQTT broker:', MQTT_BROKER);
@@ -706,6 +732,7 @@
                 // Request status from both Pis
                 sendToPi1({ command: 'status' });
                 sendToPi2({ command: 'status' });
+                startMoodCountdown();
             });
 
             client.on('message', (topic, message) => {
@@ -881,6 +908,7 @@
             document.getElementById('moodValue').style.color = moodColors[mood] || '#00d9ff';
             document.getElementById('playlistName').textContent = '🎵 ' + playlistName;
             document.getElementById('playlistLink').href = playlistUrl;
+            startMoodCountdown();
         }
 
         function handlePi2Status(payload) {
