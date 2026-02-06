@@ -314,7 +314,7 @@ HIST_KEEP_S = 2.0
 
 # ---------- Twist detection ----------
 TWIST_GY_THR_DPS = 180.0
-TWIST_RIGHT_IS_POSITIVE_GY = False
+TWIST_RIGHT_IS_POSITIVE_GY = True
 
 # ---------- Swipe detection ----------
 SWIPE_DAZ_THR_G = 0.55
@@ -652,20 +652,28 @@ async def run_gesture_detection():
         return
 
     print(f"[IMU] Connecting to {IMU_MAC}...")
+    client = None
     try:
-        async with BleakClient(IMU_MAC) as client:
-            print("[IMU] Connected.")
+        client = BleakClient(IMU_MAC)
+        await client.connect()
+        print("[IMU] Connected.")
 
-            try:
-                await imu_run(client, CHAR_NOTIFY_PRIMARY, "PRIMARY")
-            except Exception as e:
-                print(f"[PRIMARY] Error: {e}")
+        try:
+            await imu_run(client, CHAR_NOTIFY_PRIMARY, "PRIMARY")
+        except Exception as e:
+            print(f"[PRIMARY] Error: {e}")
 
-            print("\nSwitching to fallback notify characteristic...\n")
-            await imu_run(client, CHAR_NOTIFY_FALLBACK, "FALLBACK")
+        print("\nSwitching to fallback notify characteristic...\n")
+        await imu_run(client, CHAR_NOTIFY_FALLBACK, "FALLBACK")
 
     except Exception as e:
         print(f"[IMU] Connection error: {e}")
+    finally:
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
 
 
 # ============================================================================

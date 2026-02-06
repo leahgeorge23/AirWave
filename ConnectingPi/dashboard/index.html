@@ -902,7 +902,7 @@
                 'sad': '😢',
                 'energetic': '⚡',
                 'calm': '😌',
-                'neutral': '😐'
+                'neutral': '😌'
             };
             
             const moodColors = {
@@ -910,7 +910,15 @@
                 'sad': '#6495ED',
                 'energetic': '#FF6B6B',
                 'calm': '#98D8C8',
-                'neutral': '#B0B0B0'
+                'neutral': '#98D8C8'
+            };
+
+            const moodLabels = {
+                'happy': 'Happy',
+                'sad': 'Sad',
+                'energetic': 'Energetic',
+                'calm': 'Chill',
+                'neutral': 'Chill'
             };
 
             const mood = payload.mood || 'neutral';
@@ -921,10 +929,11 @@
             document.getElementById('moodSection').style.display = 'block';
             
             // Update mood display
+            const moodLabel = moodLabels[mood] || (mood.charAt(0).toUpperCase() + mood.slice(1));
             document.getElementById('moodEmoji').textContent = moodEmojis[mood] || '😐';
-            document.getElementById('moodLabel').textContent = mood.charAt(0).toUpperCase() + mood.slice(1) + ' Mood Detected';
+            document.getElementById('moodLabel').textContent = `${moodLabel} Mood Detected`;
             document.getElementById('moodLabel').style.color = moodColors[mood] || '#00d9ff';
-            document.getElementById('moodValue').textContent = mood.charAt(0).toUpperCase() + mood.slice(1);
+            document.getElementById('moodValue').textContent = moodLabel;
             document.getElementById('moodValue').style.color = moodColors[mood] || '#00d9ff';
             document.getElementById('playlistName').textContent = '🎵 ' + playlistName;
             document.getElementById('playlistLink').href = playlistUrl;

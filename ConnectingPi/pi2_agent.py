@@ -86,13 +86,13 @@ error_smooth = 0.3
 MOOD_CHECK_INTERVAL = 15
 LAST_MOOD_CHECK = 0
 
-USE_DEEPFACE = 1
+USE_DEEPFACE = 0
 DEEPFACE_MAX_SECONDS = 0.6
 DEEPFACE_AVAILABLE = False
 deepface_enabled = USE_DEEPFACE
 RESET_PAN_ON_EXIT = os.environ.get("RESET_PAN_ON_EXIT", "0") == "1"
 TILT_INVERT = 0
-PAN_INVERT = os.environ.get("PAN_INVERT", "1") == "1"
+PAN_INVERT = os.environ.get("PAN_INVERT", "1") == "0"
 
 if USE_DEEPFACE:
     try:
@@ -460,41 +460,56 @@ def analyze_mood_heuristic(frame, face_bbox, eye_cascade, smile_cascade):
     b, g, r = cv2.split(face_color)
     warmth = np.mean(r) - np.mean(b)
     
-    mood_scores = {"happy": 0, "sad": 0, "calm": 0, "neutral": 0}
+    mood_scores = {"happy": 0, "sad": 0, "calm": 0, "neutral": 1}
 
     # Smile is the strongest happy signal in your calibration set
     if has_smile:
-        mood_scores["happy"] += 4
+        mood_scores["happy"] += 6
+        mood_scores["calm"] += 0.5
     else:
-        mood_scores["sad"] += 2
-        mood_scores["calm"] += 1
-
-    # Brightness bands tuned to your calibration (sad lower, happy/energetic higher)
-    if brightness < 68:
-        mood_scores["sad"] += 2
-    elif brightness > 82:
-        mood_scores["happy"] += 2
-    else:
-        mood_scores["calm"] += 1
-
-    # Contrast: lower tends to sad, mid tends to calm
-    if contrast < 42:
-        mood_scores["sad"] += 1
-    else:
-        mood_scores["calm"] += 1
-
-    # Eyes: more eyes can indicate alertness, none can indicate calm
-    if eyes_detected == 0:
-        mood_scores["calm"] += 1
-
-    # Warmth: higher skews happy, lower skews sad/calm in your data
-    if warmth > 75:
-        mood_scores["happy"] += 2
-    elif warmth < 60:
         mood_scores["sad"] += 1
         mood_scores["calm"] += 1
-    else:
         mood_scores["neutral"] += 1
+
+    # Brightness bands tuned to your calibration stats
+    # Chill mean ~101, Sad mean ~92
+    if brightness < 90:
+        mood_scores["sad"] += 2
+    elif brightness < 98:
+        mood_scores["sad"] += 1
+        mood_scores["neutral"] += 1
+    elif brightness < 115:
+        mood_scores["calm"] += 2
+    else:
+        mood_scores["happy"] += 1
+
+    # Contrast: chill lower (~42), sad higher (~48)
+    if contrast > 47:
+        mood_scores["sad"] += 2
+    elif contrast > 44:
+        mood_scores["sad"] += 1
+        mood_scores["neutral"] += 1
+    elif contrast < 40:
+        mood_scores["calm"] += 2
+    else:
+        mood_scores["calm"] += 1
+
+    # Eyes: sad tends to have fewer detected eyes
+    if eyes_detected == 0:
+        mood_scores["sad"] += 1
+    elif eyes_detected == 1:
+        mood_scores["neutral"] += 1
+    else:
+        mood_scores["calm"] += 1
+
+    # Warmth: sad lower (~22), chill/happy higher (~24-26)
+    if warmth < 22.5:
+        mood_scores["sad"] += 2
+    elif warmth < 24.0:
+        mood_scores["sad"] += 1
+        mood_scores["neutral"] += 1
+    else:
+        mood_scores["calm"] += 1
     
     dominant_mood = max(mood_scores, key=mood_scores.get)
     total = sum(mood_scores.values())
@@ -574,6 +589,8 @@ def check_mood_and_recommend(frame, face_bbox, eye_cascade, smile_cascade):
     print("=" * 50)
     
     mood, confidence = analyze_mood(frame, face_bbox, eye_cascade, smile_cascade)
+    if confidence < 45 and mood != "happy":
+        mood = "calm"
     print(f"Detected mood: {mood.upper()} ({confidence:.0f}% confidence)")
     
     playlist_name, playlist_url = recommend_playlist(mood)
