@@ -746,6 +746,17 @@ def run_voice_detection(loop: asyncio.AbstractEventLoop):
 
     # Choose a microphone: prefer first device with inputs>0; otherwise fallback
     mic_index = vc.DEVICE_INDEX
+
+    # --- FORCE VOICE_DEVICE override if provided ---
+    voice_dev_env = os.environ.get("VOICE_DEVICE")
+    if voice_dev_env is not None and str(voice_dev_env).strip() != "":
+        try:
+            mic_index = int(voice_dev_env)
+            print(f"[VOICE] Using VOICE_DEVICE env override: {mic_index}")
+        except ValueError:
+            print(f"[VOICE] Invalid VOICE_DEVICE='{voice_dev_env}', ignoring")
+    # ------------------------------------------------
+  
     devices_info = get_input_devices()
     chosen_name = None
 
