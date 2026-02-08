@@ -61,11 +61,7 @@ try:
     )
 except ImportError:
     # Fallback if config.py doesn't exist
-<<<<<<< Updated upstream
-    MQTT_BROKER = os.environ.get("MQTT_BROKER", "Leahs-MacBook-Pro.local")  # <-- CHANGE THIS
-=======
     MQTT_BROKER = os.environ.get("MQTT_BROKER", "192.168.1.238")  # <-- CHANGE THIS
->>>>>>> Stashed changes
     MQTT_PORT = 1883
     MQTT_KEEPALIVE = 60
     IMU_MAC_ADDRESS = os.environ.get("IMU_MAC", "D9:41:48:15:5E:FB")  # <-- CHANGE THIS
@@ -89,14 +85,6 @@ voice_enabled = True
 
 voice_cmd_queue = None
 gesture_cmd_queue = None
-
-<<<<<<< Updated upstream
-voice_cmd_queue = None
-gesture_cmd_queue = None
-
-=======
->>>>>>> Stashed changes
-
 
 # ============================================================================
 # LED FEEDBACK MODULE (best-effort; won't crash if not sudo)
@@ -913,11 +901,6 @@ def run_voice_detection(loop: asyncio.AbstractEventLoop):
         except ValueError:
             print(f"[VOICE] Invalid VOICE_DEVICE='{voice_dev_env}', ignoring")
     # ------------------------------------------------
-<<<<<<< Updated upstream
-  
-=======
-    
->>>>>>> Stashed changes
     devices_info = get_input_devices()
     chosen_name = None
 
