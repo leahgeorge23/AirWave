@@ -32,6 +32,7 @@ from collections import deque
 import asyncio
 import paho.mqtt.client as mqtt
 import numpy as np
+import pyaudio
 
 # Voice mapping (your existing module)
 import voice_commands as vc
