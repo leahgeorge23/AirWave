@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 """
 Pi 1 Agent - MQTT-enabled controller for:
@@ -30,6 +31,8 @@ import traceback
 from collections import deque
 import asyncio
 import paho.mqtt.client as mqtt
+import numpy as np
+import pyaudio
 
 # Voice mapping (your existing module)
 import voice_commands as vc
@@ -58,7 +61,11 @@ try:
     )
 except ImportError:
     # Fallback if config.py doesn't exist
+<<<<<<< Updated upstream
     MQTT_BROKER = os.environ.get("MQTT_BROKER", "Leahs-MacBook-Pro.local")  # <-- CHANGE THIS
+=======
+    MQTT_BROKER = os.environ.get("MQTT_BROKER", "192.168.1.238")  # <-- CHANGE THIS
+>>>>>>> Stashed changes
     MQTT_PORT = 1883
     MQTT_KEEPALIVE = 60
     IMU_MAC_ADDRESS = os.environ.get("IMU_MAC", "D9:41:48:15:5E:FB")  # <-- CHANGE THIS
@@ -69,20 +76,26 @@ TOPIC_GESTURES = "home/gestures"
 TOPIC_PI1_STATUS = "home/pi1/status"
 TOPIC_PI1_COMMANDS = "home/pi1/commands"
 
-VOICE_ENABLED_AT_START = 0
+VOICE_ENABLED_AT_START = 1
 
 
 # ============================================================================
 # GLOBAL STATE
 # ============================================================================
 mqtt_client = None
-led_enabled = False
-gesture_enabled = True
-voice_enabled = False
+led_enabled = True
+gesture_enabled = False
+voice_enabled = True
 
 voice_cmd_queue = None
 gesture_cmd_queue = None
 
+<<<<<<< Updated upstream
+voice_cmd_queue = None
+gesture_cmd_queue = None
+
+=======
+>>>>>>> Stashed changes
 
 
 # ============================================================================
@@ -698,6 +711,150 @@ async def run_gesture_detection():
 # ============================================================================
 # VOICE COMMAND DETECTION (runs in a thread)
 # ============================================================================
+def run_voice_and_fft(loop: asyncio.AbstractEventLoop):
+    import speech_recognition as sr
+
+    r = sr.Recognizer()
+
+    RATE = 16000
+    CHUNK = 1024
+    FFT_N = 1024
+    ALPHA = 0.18
+    GATE = 0.05
+    DECAY = 0.985
+
+    BASS = (30, 180)
+    MIDS = (180, 1500)
+    HIGHS = (1500, 6000)
+
+    window = np.hanning(FFT_N).astype(np.float32)
+
+    sb = sm = sh = 0.0
+    pb = pm = ph = 1e-6
+
+    pa = pyaudio.PyAudio()
+
+    # pick the same input device pi1_agent already prefers
+    mic_index = vc.DEVICE_INDEX
+
+    # open ONE shared mic stream
+    try:
+        stream = pa.open(
+            format=pyaudio.paInt16,
+            channels=1,
+            rate=RATE,
+            input=True,
+            input_device_index=mic_index,
+            frames_per_buffer=CHUNK,
+        )
+    except Exception as e:
+        print(f"[VOICE+FFT] Could not open mic (device_index={mic_index}): {e}")
+        return
+
+    print(f"[VOICE+FFT] Mic opened once (device_index={mic_index})")
+
+    # simple speech buffer (VAD-ish)
+    speech_frames = []
+    speech_active = False
+    last_voice_time = 0.0
+
+    def clamp01(x):
+        return 0.0 if x < 0.0 else (1.0 if x > 1.0 else x)
+
+    def band_mean(freqs, mags, lo, hi):
+        idx = np.where((freqs >= lo) & (freqs < hi))[0]
+        if idx.size == 0:
+            return 0.0
+        return float(np.mean(mags[idx]))
+
+    try:
+        while True:
+            if not voice_enabled:
+                time.sleep(0.1)
+                continue
+
+            data = stream.read(CHUNK, exception_on_overflow=False)
+            samples = np.frombuffer(data, dtype=np.int16).astype(np.float32)
+
+            # ---------- FFT levels (every chunk) ----------
+            x = (samples[:FFT_N] * window) if len(samples) >= FFT_N else (np.pad(samples, (0, FFT_N-len(samples))) * window)
+            mags = np.abs(np.fft.rfft(x))
+            freqs = np.fft.rfftfreq(FFT_N, d=1.0 / RATE)
+
+            rb = band_mean(freqs, mags, BASS[0], BASS[1])
+            rm = band_mean(freqs, mags, MIDS[0], MIDS[1])
+            rh = band_mean(freqs, mags, HIGHS[0], HIGHS[1])
+
+            pb = max(rb, pb * DECAY)
+            pm = max(rm, pm * DECAY)
+            ph = max(rh, ph * DECAY)
+
+            nb = clamp01(rb / (pb + 1e-6))
+            nm = clamp01(rm / (pm + 1e-6))
+            nh = clamp01(rh / (ph + 1e-6))
+
+            nb = 0.0 if nb < GATE else nb
+            nm = 0.0 if nm < GATE else nm
+            nh = 0.0 if nh < GATE else nh
+
+            sb = (1 - ALPHA) * sb + ALPHA * nb
+            sm = (1 - ALPHA) * sm + ALPHA * nm
+            sh = (1 - ALPHA) * sh + ALPHA * nh
+
+            # publish FFT levels for light_dance.py
+            if mqtt_client and mqtt_client.is_connected():
+                mqtt_client.publish(
+                    "home/pi1/audio_fft",
+                    json.dumps({"bass": sb, "mids": sm, "highs": sh, "ts": time.time()})
+                )
+
+            # ---------- crude voice activity detection ----------
+            rms = float(np.sqrt(np.mean(samples * samples)))
+            now = time.time()
+
+            if rms > 900:  # tune if needed
+                if not speech_active:
+                    speech_frames = []
+                    speech_active = True
+                speech_frames.append(data)
+                last_voice_time = now
+            else:
+                if speech_active:
+                    # end speech after 0.5s quiet
+                    if now - last_voice_time > 0.5:
+                        speech_active = False
+
+                        raw = b"".join(speech_frames)
+                        speech_frames = []
+
+                        audio = sr.AudioData(raw, RATE, 2)
+                        try:
+                            text = r.recognize_google(audio, language="en-US")
+                            print(f"[VOICE] Heard: {text}")
+                            cmd = vc.map_command(text)
+                            if cmd:
+                                print(f"[VOICE] Recognized command: {cmd}")
+                                loop.call_soon_threadsafe(voice_cmd_queue.put_nowait, cmd)
+                        except sr.UnknownValueError:
+                            pass
+                        except sr.RequestError as e:
+                            print(f"[VOICE] Google STT error: {e}")
+
+    except Exception as e:
+        print(f"[VOICE+FFT] Error: {e}")
+
+    finally:
+        try:
+            stream.stop_stream()
+            stream.close()
+        except Exception:
+            pass
+        try:
+            pa.terminate()
+        except Exception:
+            pass
+
+
 def run_voice_detection(loop: asyncio.AbstractEventLoop):
     def get_input_devices():
         """Return list of (index, name, max_inputs) using PyAudio if possible."""
@@ -756,7 +913,11 @@ def run_voice_detection(loop: asyncio.AbstractEventLoop):
         except ValueError:
             print(f"[VOICE] Invalid VOICE_DEVICE='{voice_dev_env}', ignoring")
     # ------------------------------------------------
+<<<<<<< Updated upstream
   
+=======
+    
+>>>>>>> Stashed changes
     devices_info = get_input_devices()
     chosen_name = None
 
