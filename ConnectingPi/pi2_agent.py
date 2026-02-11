@@ -280,38 +280,45 @@ def _run_bluetoothctl_player(command):
     if shutil.which("bluetoothctl") is None:
         print("[MEDIA] bluetoothctl not found; cannot control Bluetooth playback")
         return False
-    try:
-        list_result = subprocess.run(
-            ["bluetoothctl", "player", "list"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True
-        )
-        if list_result.returncode != 0:
-            print("[MEDIA] bluetoothctl player list failed")
+
+    def _try_family(subcmd):
+        try:
+            list_result = subprocess.run(
+                ["bluetoothctl", subcmd, "list"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            if list_result.returncode != 0:
+                return False
+            match = re.search(r"Player\s+(\S+)", list_result.stdout)
+            if not match:
+                return False
+            player_path = match.group(1)
+            select_result = subprocess.run(
+                ["bluetoothctl", subcmd, "select", player_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            if select_result.returncode != 0:
+                return False
+            result = subprocess.run(
+                ["bluetoothctl", subcmd, command],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            return result.returncode == 0
+        except Exception:
             return False
-        match = re.search(r"Player\s+(\S+)", list_result.stdout)
-        if not match:
-            print("[MEDIA] No Bluetooth player found via bluetoothctl")
-            return False
-        player_path = match.group(1)
-        select_result = subprocess.run(
-            ["bluetoothctl", "player", "select", player_path],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-        if select_result.returncode != 0:
-            print("[MEDIA] bluetoothctl player select failed")
-            return False
-        result = subprocess.run(
-            ["bluetoothctl", "player", command],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-        return result.returncode == 0
-    except Exception as exc:
-        print(f"[MEDIA] bluetoothctl error: {exc}")
-        return False
+
+    # BlueZ has used both "player" and "media-player" in different releases.
+    if _try_family("player"):
+        return True
+    if _try_family("media-player"):
+        return True
+
+    print("[MEDIA] bluetoothctl control failed (no AVRCP player?)")
+    return False
 
 
 def media_next():
