@@ -1,0 +1,11 @@
+#!/bin/bash
+sleep 5
+killall bluealsa 2>/dev/null
+bluealsa -p a2dp-sink &
+sleep 2
+hciconfig hci0 class 0x240404
+bt-agent -c NoInputNoOutput &
+bluetoothctl discoverable on
+bluetoothctl pairable on
+amixer set PCM 100%
+bluealsa-aplay 00:00:00:00:00:00 &
