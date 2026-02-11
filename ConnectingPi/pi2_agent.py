@@ -8,6 +8,7 @@ import numpy as np
 import random
 import threading
 import json
+import re
 import shutil
 import os
 import paho.mqtt.client as mqtt
@@ -275,8 +276,48 @@ def _run_playerctl(args):
     return result.returncode == 0
 
 
+def _run_bluetoothctl_player(command):
+    if shutil.which("bluetoothctl") is None:
+        print("[MEDIA] bluetoothctl not found; cannot control Bluetooth playback")
+        return False
+    try:
+        list_result = subprocess.run(
+            ["bluetoothctl", "player", "list"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True
+        )
+        if list_result.returncode != 0:
+            print("[MEDIA] bluetoothctl player list failed")
+            return False
+        match = re.search(r"Player\s+(\S+)", list_result.stdout)
+        if not match:
+            print("[MEDIA] No Bluetooth player found via bluetoothctl")
+            return False
+        player_path = match.group(1)
+        select_result = subprocess.run(
+            ["bluetoothctl", "player", "select", player_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        if select_result.returncode != 0:
+            print("[MEDIA] bluetoothctl player select failed")
+            return False
+        result = subprocess.run(
+            ["bluetoothctl", "player", command],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        return result.returncode == 0
+    except Exception as exc:
+        print(f"[MEDIA] bluetoothctl error: {exc}")
+        return False
+
+
 def media_next():
     if _run_playerctl(["next"]):
+        return True
+    if _run_bluetoothctl_player("next"):
         return True
     return _run_playerctl(["position", f"{MEDIA_SEEK_SECONDS}+"])
 
@@ -284,17 +325,23 @@ def media_next():
 def media_previous():
     if _run_playerctl(["previous"]):
         return True
+    if _run_bluetoothctl_player("previous"):
+        return True
     return _run_playerctl(["position", f"{MEDIA_SEEK_SECONDS}-"])
 
 
 def media_pause():
     if _run_playerctl(["pause"]):
         return True
+    if _run_bluetoothctl_player("pause"):
+        return True
     return _run_playerctl(["play-pause"])
 
 
 def media_play():
     if _run_playerctl(["play"]):
+        return True
+    if _run_bluetoothctl_player("play"):
         return True
     return _run_playerctl(["play-pause"])
 
