@@ -35,7 +35,7 @@ import numpy as np
 import pyaudio
 
 # Voice mapping (your existing module)
-import voice_commands as vc
+import voice_commands_offline as vc
 
 # BLE client
 try:
@@ -817,9 +817,15 @@ def run_voice_and_fft(loop: asyncio.AbstractEventLoop):
 
                         audio = sr.AudioData(raw, RATE, 2)
                         try:
-                            text = r.recognize_google(audio, language="en-US")
-                            print(f"[VOICE] Heard: {text}")
+                            # text = r.recognize_google(audio, language="en-US")
+                            # print(f"[VOICE] Heard: {text}")
+                            # cmd = vc.map_command(text)
+                            text = vc.recognize_offline(audio)
+                            if not text:
+                              continue
+                            print(f"[VOICE] Heard (offline): {text}")
                             cmd = vc.map_command(text)
+                          
                             if cmd:
                                 print(f"[VOICE] Recognized command: {cmd}")
                                 loop.call_soon_threadsafe(voice_cmd_queue.put_nowait, cmd)
