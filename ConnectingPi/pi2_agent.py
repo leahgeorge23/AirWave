@@ -32,7 +32,7 @@ try:
 except ImportError:
     # Fallback if config.py doesn't exist
     import os
-    MQTT_BROKER = "Leah-MacBook-Pro.local"
+    MQTT_BROKER = "Drews-MacBook-Pro.local"
     MQTT_KEEPALIVE = 60
     BLUETOOTH_SPEAKER_MAC = os.environ.get("SPEAKER_MAC", "F8:7D:76:AA:A8:8C")  # <-- CHANGE THIS
     BLUETOOTH_SPEAKER_NAME = "A2DP"
