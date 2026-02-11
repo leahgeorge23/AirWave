@@ -1,0 +1,5 @@
+#!/bin/sh -e
+hciattach /dev/serial1 bcm43xx 3000000 flow - &
+sleep 8
+/usr/local/bin/bt-setup.sh &
+exit 0
