@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title> 🌊 AirWave 🌊 </title>
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script src="config.js"></script>
     <style>
         * {
             margin: 0;
@@ -689,11 +690,11 @@
         // Make sure your MQTT broker has WebSockets enabled on port 9001
         // ============================================================
         
-        // ⬇️ CHANGE THIS to your MQTT broker address ⬇️
-        const MQTT_HOST = 'Leahs-MacBook-Pro.local';  // <-- CHANGE THIS (e.g., '192.168.1.100' or 'your-mac.local')
-        const MQTT_WS_PORT = 9001;      // WebSocket port (usually 9001)
+        // MQTT settings loaded from config.js (run 'python launcher.py --setup' to change)
+        const MQTT_HOST = MQTT_CONFIG.host;
+        const MQTT_WS_PORT = MQTT_CONFIG.wsPort;
         
-        const MQTT_BROKER = `ws://${MQTT_HOST}:${MQTT_WS_PORT}`;
+        const MQTT_BROKER = MQTT_CONFIG.broker;
         
         // Topics (usually don't need to change)
         const TOPIC_GESTURES = 'home/gestures';
