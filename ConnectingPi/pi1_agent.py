@@ -26,6 +26,7 @@ import struct
 import threading
 import time
 import math
+import re
 import queue  
 import traceback
 from collections import deque
@@ -34,8 +35,14 @@ import paho.mqtt.client as mqtt
 import numpy as np
 import pyaudio
 
-# Voice mapping (your existing module)
+# Voice mapping (offline Vosk module)
 import voice_commands_offline as vc
+try:
+    import spotify_controller as spotify
+    SPOTIFY_DIRECT_AVAILABLE = True
+except Exception:
+    spotify = None
+    SPOTIFY_DIRECT_AVAILABLE = False
 
 # BLE client
 try:
@@ -61,7 +68,7 @@ try:
     )
 except ImportError:
     # Fallback if config.py doesn't exist
-    MQTT_BROKER = os.environ.get("MQTT_BROKER", "192.168.1.238")  # <-- CHANGE THIS
+    MQTT_BROKER = "Leahs-MacBook-Pro.local"  # <-- CHANGE THIS
     MQTT_PORT = 1883
     MQTT_KEEPALIVE = 60
     IMU_MAC_ADDRESS = os.environ.get("IMU_MAC", "D9:41:48:15:5E:FB")  # <-- CHANGE THIS
@@ -73,6 +80,7 @@ TOPIC_PI1_STATUS = "home/pi1/status"
 TOPIC_PI1_COMMANDS = "home/pi1/commands"
 
 VOICE_ENABLED_AT_START = 1
+DIRECT_SPOTIFY_ENABLED = os.environ.get("PI1_DIRECT_SPOTIFY", "1") == "1"
 
 
 # ============================================================================
@@ -80,7 +88,7 @@ VOICE_ENABLED_AT_START = 1
 # ============================================================================
 mqtt_client = None
 led_enabled = True
-gesture_enabled = False
+gesture_enabled = True
 voice_enabled = True
 
 voice_cmd_queue = None
@@ -237,11 +245,46 @@ def publish_gesture(gesture_type, source="gesture"):
         mqtt_client.publish(TOPIC_GESTURES, json.dumps(payload))
         print(f"[MQTT] Published: {gesture_type} ({source})")
 
+    # Optional direct Spotify control from Pi 1 so transport can still work
+    # when the Pi 2 consumer path is unavailable.
+    if DIRECT_SPOTIFY_ENABLED:
+        threading.Thread(
+            target=_execute_direct_spotify_command,
+            args=(gesture_type,),
+            daemon=True,
+        ).start()
+
     # LED feedback
     if source == "gesture":
         led_flash((0, 255, 0), 0.12)  # green
     else:
         led_flash((0, 0, 255), 0.12)  # blue
+
+
+def _execute_direct_spotify_command(command):
+    if not SPOTIFY_DIRECT_AVAILABLE or spotify is None:
+        return False
+
+    command_map = {
+        "PLAY": spotify.play,
+        "PAUSE": spotify.pause,
+        "NEXT_TRACK": spotify.next_track,
+        "PREV_TRACK": spotify.previous_track,
+    }
+    fn = command_map.get(command)
+    if fn is None:
+        return False
+
+    try:
+        ok = bool(fn())
+        if ok:
+            print(f"[SPOTIFY] Direct command ok: {command}")
+        else:
+            print(f"[SPOTIFY] Direct command failed: {command}")
+        return ok
+    except Exception as e:
+        print(f"[SPOTIFY] Direct command error ({command}): {e}")
+        return False
 
 
 def publish_status(status):
@@ -257,6 +300,34 @@ def publish_status(status):
             "timestamp": time.time(),
         }
         mqtt_client.publish(TOPIC_PI1_STATUS, json.dumps(payload))
+
+
+def map_voice_command_strict(text):
+    """Map voice text to one clear command; return None for ambiguous/noise."""
+    if not text:
+        return None
+
+    t = " ".join(str(text).strip().lower().split())
+    intents = set()
+
+    if re.search(r"\b(next|skip)\b", t):
+        intents.add("NEXT_TRACK")
+    if re.search(r"\b(previous|back)\b", t):
+        intents.add("PREV_TRACK")
+    if re.search(r"\b(pause|stop)\b", t):
+        intents.add("PAUSE")
+    if re.search(r"\bresume\b", t) or re.search(r"\bplay\b", t):
+        intents.add("PLAY")
+    if re.search(r"\b(volume up|turn up|louder|higher)\b", t):
+        intents.add("VOL_UP")
+    if re.search(r"\b(volume down|turn down|quieter|softer)\b", t):
+        intents.add("VOL_DOWN")
+
+    # If ASR output mixes commands ("play pause ..."), skip instead of guessing.
+    if len(intents) != 1:
+        return None
+
+    return next(iter(intents))
 
 
 # ============================================================================
@@ -308,7 +379,7 @@ DOUBLE_FLICK_MAX_SPAN_S = 0.85
 
 # ---------- Command timing ----------
 COMMAND_TIMEOUT_S = 5.0
-COMMAND_READY_DELAY_S = 1.25
+COMMAND_READY_DELAY_S = 1.0
 REARM_READY_DELAY_S = 0.8
 POST_COMMAND_COOLDOWN_S = 0.40
 REARM_IDLE_S = 0.25
@@ -817,15 +888,9 @@ def run_voice_and_fft(loop: asyncio.AbstractEventLoop):
 
                         audio = sr.AudioData(raw, RATE, 2)
                         try:
-                            # text = r.recognize_google(audio, language="en-US")
-                            # print(f"[VOICE] Heard: {text}")
-                            # cmd = vc.map_command(text)
-                            text = vc.recognize_offline(audio)
-                            if not text:
-                              continue
-                            print(f"[VOICE] Heard (offline): {text}")
-                            cmd = vc.map_command(text)
-                          
+                            text = r.recognize_google(audio, language="en-US")
+                            print(f"[VOICE] Heard: {text}")
+                            cmd = map_voice_command_strict(text)
                             if cmd:
                                 print(f"[VOICE] Recognized command: {cmd}")
                                 loop.call_soon_threadsafe(voice_cmd_queue.put_nowait, cmd)
@@ -895,6 +960,12 @@ def run_voice_detection(loop: asyncio.AbstractEventLoop):
 
     r = sr.Recognizer()
 
+    # Make behavior consistent (avoid drift / long phrases)
+    r.dynamic_energy_threshold = False
+    r.energy_threshold = int(os.environ.get("VOICE_ENERGY", "350"))
+    r.pause_threshold = float(os.environ.get("VOICE_PAUSE_THRESHOLD", "0.35"))
+    r.non_speaking_duration = float(os.environ.get("VOICE_NON_SPEAKING_DURATION", "0.20"))
+
     # Choose a microphone: prefer first device with inputs>0; otherwise fallback
     mic_index = vc.DEVICE_INDEX
 
@@ -952,12 +1023,13 @@ def run_voice_detection(loop: asyncio.AbstractEventLoop):
             chunk_size=vc.CHUNK,
         ) as source:
             print(f"[VOICE] Microphone opened (device={mic_index}, rate={vc.SAMPLE_RATE}, chunk={vc.CHUNK})")
-            print("[VOICE] Calibrating for ambient noise...")
-            try:
-                r.adjust_for_ambient_noise(source, duration=1.0)
-            except Exception as e:
-                print(f"[VOICE] Calibration error: {e}")
-                return
+            if os.environ.get("VOICE_CALIBRATE", "0") == "1":
+                print("[VOICE] Calibrating for ambient noise (1s)...")
+                try:
+                    r.adjust_for_ambient_noise(source, duration=1.0)
+                except Exception as e:
+                    print(f"[VOICE] Calibration error: {e}")
+                    return
             print("[VOICE] Voice detection active; listening for commands")
 
             while True:
@@ -967,24 +1039,86 @@ def run_voice_detection(loop: asyncio.AbstractEventLoop):
 
                 try:
                     print("[VOICE] Listening...")
-                    audio = r.listen(source, phrase_time_limit=3.0)
-                    try:
-                        text = r.recognize_google(audio, language="en-US")
-                        print(f"[VOICE] Heard: {text}")
 
-                        cmd = vc.map_command(text)
-                        if cmd:
-                            print(f"[VOICE] Recognized command: {cmd}")
-                            loop.call_soon_threadsafe(voice_cmd_queue.put_nowait, cmd)
+                    voice_timeout = float(os.environ.get("VOICE_TIMEOUT", "1.0"))
+                    phrase_time = float(os.environ.get("VOICE_PHRASE_TIME", "1.2"))
+                    audio = r.listen(source, timeout=voice_timeout, phrase_time_limit=phrase_time)
 
-                    except sr.UnknownValueError:
-                        pass
-                    except sr.RequestError as e:
-                        print(f"[VOICE] Google STT error: {e}")
+                    final_text = None
+                    partial_text = None
+                    final_from_partial = False
 
+                    if hasattr(vc, "recognize_offline_with_partial"):
+                        final_text, partial_text = vc.recognize_offline_with_partial(audio)
+                    else:
+                        final_text = vc.recognize_offline(audio)
+
+                    if partial_text and os.environ.get("VOICE_PRINT_PARTIALS", "1") == "1":
+                        print(f"[VOICE] Partial: {partial_text}")
+
+                    # Agent-level partial debounce: accept stable partials to reduce "finicky" feel
+                    if not hasattr(run_voice_detection, "_last_partial"):
+                        run_voice_detection._last_partial = ""
+                        run_voice_detection._last_partial_t = 0.0
+
+                    if not hasattr(run_voice_detection, "_last_cmd"):
+                        run_voice_detection._last_cmd = None
+                        run_voice_detection._last_cmd_t = 0.0
+
+                    if not final_text and partial_text:
+                        now = time.time()
+                        if partial_text == run_voice_detection._last_partial:
+                            stable = float(os.environ.get("VOICE_PARTIAL_STABLE", "0.40"))
+                            if (now - run_voice_detection._last_partial_t) >= stable:
+                                if any(k in partial_text for k in ["play", "pause", "stop", "next", "skip", "previous", "back", "volume", "louder", "quieter", "softer", "turn", "increase", "decrease"]):
+                                    final_text = partial_text
+                                    final_from_partial = True
+                                    run_voice_detection._last_partial = ""
+                        else:
+                            run_voice_detection._last_partial = partial_text
+                            run_voice_detection._last_partial_t = now
+
+                    if not final_text:
+                        print("[VOICE] Ready for next command")
+                        continue
+
+                    text = str(final_text).strip().lower()
+                    if not text:
+                        print("[VOICE] Ready for next command")
+                        continue
+
+                    print(f"[VOICE] Heard (offline): {text}")
+
+                    # When we consume a stable partial as a command, reset Vosk state
+                    # so old words do not accumulate into the next partial.
+                    if final_from_partial and hasattr(vc, "_rec") and vc._rec is not None:
+                        try:
+                            vc._rec.Reset()
+                        except Exception:
+                            pass
+
+                    cmd = map_voice_command_strict(text)
+                    if cmd:
+                        now = time.time()
+                        cooldown = float(os.environ.get("VOICE_CMD_COOLDOWN", "0.75"))
+                        if run_voice_detection._last_cmd == cmd and (now - run_voice_detection._last_cmd_t) < cooldown:
+                            print("[VOICE] Duplicate suppressed")
+                            print("[VOICE] Ready for next command")
+                            continue
+
+                        run_voice_detection._last_cmd = cmd
+                        run_voice_detection._last_cmd_t = now
+
+                        print(f"[VOICE] Recognized command: {cmd}")
+                        loop.call_soon_threadsafe(voice_cmd_queue.put_nowait, cmd)
+
+                    print("[VOICE] Ready for next command")
+
+                except sr.WaitTimeoutError:
+                    continue
                 except Exception as e:
-                    print(f"[VOICE] Listen error: {e}")
-                    time.sleep(1.0)
+                    print(f"[VOICE] Listen/recognition error: {e}")
+                    time.sleep(0.2)
 
     except Exception as e:
         print(f"[VOICE] Microphone error: {e}")
