@@ -1,17 +1,114 @@
-# requires installation of:
-#   sudo apt install portaudio19-dev flac pocketsphinx python3-pocketsphinx python3-pyaudio
-#   pip3 install SpeechRecognition
+import json
+import os
+from typing import Optional, Tuple
 
-import speech_recognition as sr
-import time
+from vosk import Model, KaldiRecognizer
 
-DEVICE_INDEX = 9       # "array" device index in list_devices.py
-SAMPLE_RATE = 48000
-CHUNK = 1024
+# Keep these names because pi1_agent imports them
+# NOTE: defaulting to 9 is risky; set VOICE_DEVICE in env or change this default.
+DEVICE_INDEX = int(os.environ.get("VOICE_DEVICE", "9"))
+SAMPLE_RATE = int(os.environ.get("VOICE_RATE", "16000"))  # Vosk best at 16k
+CHUNK = int(os.environ.get("VOICE_CHUNK", "1024"))
+
+MODEL_PATH = os.environ.get(
+    "VOSK_MODEL_PATH",
+    "/home/pi/vosk_models/vosk-model-small-en-us-0.15",
+)
+
+# Tight grammar = more reliable
+_PHRASES = [
+    "play",
+    "pause",
+    "stop",
+    "next",
+    "skip",
+    "previous",
+    "back",
+    "volume up",
+    "turn up",
+    "louder",
+    "volume down",
+    "turn down",
+    "quieter",
+    "softer",
+    "[unk]",
+]
+
+_model = None
+_rec = None
 
 
-def map_command(text: str):
-    """Map recognized text to a simple command string."""
+def _normalize_final_text(result_text: str) -> Optional[str]:
+    t = (result_text or "").strip().lower()
+    if not t:
+        return None
+    if "[unk]" in t or t == "unk":
+        return None
+    return t
+
+
+def _init():
+    global _model, _rec
+    if _rec is not None:
+        return
+
+    if not os.path.isdir(MODEL_PATH):
+        raise RuntimeError(
+            "[VOICE] Vosk model not found at: %s\n"
+            "Set VOSK_MODEL_PATH or download the model into that path."
+            % MODEL_PATH
+        )
+
+    _model = Model(MODEL_PATH)
+    grammar = json.dumps(_PHRASES)
+    _rec = KaldiRecognizer(_model, SAMPLE_RATE, grammar)
+
+
+def recognize_offline(audio_data) -> Optional[str]:
+    """
+    audio_data: speech_recognition.AudioData (from sr.Recognizer.listen)
+    Returns recognized text (lowercase) or None.
+    """
+    _init()
+
+    raw = audio_data.get_raw_data(convert_rate=SAMPLE_RATE, convert_width=2)
+
+    if _rec.AcceptWaveform(raw):
+        res = json.loads(_rec.Result())
+        t = _normalize_final_text(res.get("text") or "")
+        _rec.Reset()  # helps prevent carryover like "pause pause"
+        return t if t else None
+
+    return None
+
+
+def recognize_offline_with_partial(audio_data) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Returns (text, partial). text is final; partial is interim (may be None/empty).
+    """
+    _init()
+
+    raw = audio_data.get_raw_data(convert_rate=SAMPLE_RATE, convert_width=2)
+
+    if _rec.AcceptWaveform(raw):
+        res = json.loads(_rec.Result())
+        t = _normalize_final_text(res.get("text") or "")
+        _rec.Reset()  # helps prevent carryover like "pause pause"
+        return (t if t else None, None)
+
+    try:
+        partial_res = json.loads(_rec.PartialResult())
+        p = (partial_res.get("partial") or "").strip().lower()
+        return (None, p if p else None)
+    except Exception:
+        return (None, None)
+
+
+def map_command(text: str) -> Optional[str]:
+    """Map recognized text to a simple command string (same outputs as before)."""
+    if not text:
+        return None
+
     t = text.lower()
 
     if "next" in t or "skip" in t:
@@ -33,47 +130,3 @@ def map_command(text: str):
         return "VOL_DOWN"
 
     return None
-
-
-def main():
-    r = sr.Recognizer()
-
-    with sr.Microphone(device_index=DEVICE_INDEX,
-                       sample_rate=SAMPLE_RATE,
-                       chunk_size=CHUNK) as source:
-        print("Calibrating for ambient noise... stay quiet for ~1 second.")
-        r.adjust_for_ambient_noise(source, duration=1.0)
-        print("Done. Listening for commands...")
-
-        while True:
-            try:
-                print("\n[Listening...]")
-                # Listen for up to ~3 seconds per speech detection
-                audio = r.listen(source, phrase_time_limit=3.0)
-
-                try:
-                    text = r.recognize_google(audio, language="en-US")
-                    print("[Raw STT]", repr(text))
-                except sr.UnknownValueError:
-                    print("[Raw STT] (could not understand)")
-                    continue
-                except sr.RequestError as e:
-                    print("[Raw STT] Google error:", e)
-                    continue
-
-                # Map to control command
-                cmd = map_command(text)
-                if cmd:
-                    print("[COMMAND]", cmd)
-                    #implement control queue and Raspotify control
-                else:
-                    print("[COMMAND] None")
-
-            except KeyboardInterrupt:
-                print("\nExiting cleanly.")
-                break
-
-
-if __name__ == "__main__":
-    main()
-
