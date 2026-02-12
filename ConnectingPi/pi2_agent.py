@@ -12,6 +12,7 @@ import re
 import shutil
 import os
 import paho.mqtt.client as mqtt
+import spotify_controller as spotify
 
 # ============================================================================
 # CONFIGURATION - EDIT config.py OR SET ENVIRONMENT VARIABLES
@@ -33,6 +34,7 @@ except ImportError:
     # Fallback if config.py doesn't exist
     import os
     MQTT_BROKER = "Drews-MacBook-Pro.local"
+    MQTT_PORT = 1883
     MQTT_KEEPALIVE = 60
     BLUETOOTH_SPEAKER_MAC = os.environ.get("SPEAKER_MAC", "F8:7D:76:AA:A8:8C")  # <-- CHANGE THIS
     BLUETOOTH_SPEAKER_NAME = "A2DP"
@@ -47,6 +49,7 @@ TOPIC_GESTURES = "home/gestures"
 TOPIC_PI2_STATUS = "home/pi2/status"
 TOPIC_PI2_COMMANDS = "home/pi2/commands"
 TOPIC_MOOD = "home/mood"
+
 
 mqtt_client = None
 manual_volume_override = None
@@ -75,7 +78,7 @@ VOLUME_SMOOTH_ALPHA = 0.3
 DIST_SMOOTH_ALPHA = 0.15
 MAX_DIST_STEP_FT = 0.5
 
-GESTURE_VOLUME_STEP = 5
+GESTURE_VOLUME_STEP = 13
 MEDIA_SEEK_SECONDS = 10
 
 Kp_pan = 0.02
@@ -161,22 +164,22 @@ def on_mqtt_message(client, userdata, msg):
                 adjust_volume(-GESTURE_VOLUME_STEP)
                 print(f"[GESTURE] Action: volume -{GESTURE_VOLUME_STEP}")
             elif gesture_type == "NEXT_TRACK":
-                if media_next():
+                if playback_next():
                     print("[GESTURE] Action: next track/seek forward")
                 else:
                     print("[GESTURE] Action failed: next track/seek forward")
             elif gesture_type == "PREV_TRACK":
-                if media_previous():
+                if playback_previous():
                     print("[GESTURE] Action: previous track/seek backward")
                 else:
                     print("[GESTURE] Action failed: previous track/seek backward")
             elif gesture_type == "PAUSE":
-                if media_pause():
+                if playback_pause():
                     print("[GESTURE] Action: pause")
                 else:
                     print("[GESTURE] Action failed: pause")
             elif gesture_type == "PLAY":
-                if media_play():
+                if playback_play():
                     print("[GESTURE] Action: play")
                 else:
                     print("[GESTURE] Action failed: play")
@@ -352,6 +355,30 @@ def media_play():
         return True
     return _run_playerctl(["play-pause"])
 
+
+def playback_play():
+    if spotify.play():
+        return True
+    return media_play()
+
+
+def playback_pause():
+    if spotify.pause():
+        return True
+    return media_pause()
+
+
+def playback_next():
+    if spotify.next_track():
+        return True
+    return media_next()
+
+
+def playback_previous():
+    if spotify.previous_track():
+        return True
+    return media_previous()
+
 def setup_mqtt():
     global mqtt_client
     mqtt_client = mqtt.Client(client_id="pi2_agent")
@@ -408,6 +435,12 @@ def set_volume(percent):
             )
     except Exception as e:
         print("Volume set error:", e)
+
+    # Keep Spotify app volume aligned with physical output volume.
+    try:
+        threading.Thread(target=spotify.set_volume, args=(int(percent),), daemon=True).start()
+    except Exception:
+        pass
 
 
 def create_tracker():
@@ -712,6 +745,9 @@ def release_camera():
 
 def main():
     global LAST_MOOD_CHECK, is_tracking, current_distance, current_pan, current_mood, manual_volume_override, auto_volume_enabled, ref_area, recalibrate_requested
+    
+    # Warm up Spotify token/session once at startup.
+    spotify.warmup()
     
     # Release camera from any other processes first
     print("[CAMERA] Releasing camera from other processes...")
