@@ -1,0 +1,8 @@
+{
+  "mqtt_broker": "Leahs-MacBook-Pro.local",
+  "spotify_configured": false,
+  "pi1_host": "pi1.local",
+  "pi1_path": "~/Team6/ConnectingPi/pi1_agent.py",
+  "pi2_host": "pi2.local",
+  "pi2_path": "~/Team6/ConnectingPi/pi2_agent.py"
+}

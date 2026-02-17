@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 """
 Pi 1 Agent - MQTT-enabled controller for:
@@ -68,7 +67,8 @@ try:
     )
 except ImportError:
     # Fallback if config.py doesn't exist
-    MQTT_BROKER = "Leahs-MacBook-Pro.local"  # <-- CHANGE THIS
+    MQTT_BROKER_DEFAULT = "localhost"
+    MQTT_BROKER = os.environ.get("MQTT_BROKER", MQTT_BROKER_DEFAULT)
     MQTT_PORT = 1883
     MQTT_KEEPALIVE = 60
     IMU_MAC_ADDRESS = os.environ.get("IMU_MAC", "D9:41:48:15:5E:FB")  # <-- CHANGE THIS
@@ -656,7 +656,67 @@ class GestureEngine:
         return None
 
 
-# ---------------- BLE runner ----------------
+# ============================================================================
+# BLE CONNECTION HELPERS - Auto-cleanup and reconnection
+# ============================================================================
+
+async def cleanup_stale_ble_connections(mac_address):
+    """Force disconnect stale BLE connections."""
+    print(f"[BLE] Cleaning up stale connections to {mac_address}...")
+    try:
+        disconnect_cmd = f'bluetoothctl disconnect {mac_address}'
+        process = await asyncio.create_subprocess_shell(
+            disconnect_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await asyncio.wait_for(process.communicate(), timeout=3)
+        await asyncio.sleep(0.5)
+        print(f"[BLE] Disconnected via bluetoothctl")
+    except asyncio.TimeoutError:
+        pass  # Timeout is fine
+    except Exception as e:
+        print(f"[BLE] Cleanup: {e}")
+    await asyncio.sleep(1)
+
+
+async def connect_imu_with_retry(mac_address, max_retries=3):
+    """Connect to IMU with automatic cleanup and retry."""
+    from bleak import BleakClient
+    
+    # Cleanup first
+    await cleanup_stale_ble_connections(mac_address)
+    
+    for attempt in range(max_retries):
+        try:
+            print(f"[IMU] Connection attempt {attempt + 1}/{max_retries}...")
+            client = BleakClient(mac_address, timeout=10.0)
+            await client.connect()
+            
+            if client.is_connected:
+                print(f"[IMU] ✓ Connected on attempt {attempt + 1}")
+                return client
+            else:
+                await client.disconnect()
+                
+        except Exception as e:
+            print(f"[IMU] Attempt {attempt + 1} failed: {e}")
+            
+            if attempt == 0:
+                await cleanup_stale_ble_connections(mac_address)
+            
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt
+                print(f"[IMU] Retrying in {wait_time}s...")
+                await asyncio.sleep(wait_time)
+    
+    print(f"[IMU] ✗ Failed after {max_retries} attempts")
+    return None
+
+
+# ============================================================================
+# BLE runner
+# ============================================================================
 async def imu_run(client: "BleakClient", notify_uuid: str, label: str):
     """
     Reads WT901 packets from notify UUID, decodes accel/gyro,
@@ -739,10 +799,15 @@ async def run_gesture_detection():
         return
 
     print(f"[IMU] Connecting to {IMU_MAC}...")
-    client = None
+    client = await connect_imu_with_retry(IMU_MAC, max_retries=3)
+    
+    if client is None:
+        print("[IMU] Could not connect. Check if IMU is powered on.")
+        imu_connected = False
+        publish_status("online")
+        return
+    
     try:
-        client = BleakClient(IMU_MAC)
-        await client.connect()
         print("[IMU] Connected.")
         imu_connected = True
         publish_status("online")
@@ -762,9 +827,14 @@ async def run_gesture_detection():
         publish_status("online")
         if client is not None:
             try:
-                await client.disconnect()
-            except Exception:
-                pass
+                print("[IMU] Disconnecting gracefully...")
+                if client.is_connected:
+                    await client.disconnect()
+                    await asyncio.sleep(0.5)
+                print("[IMU] ✓ Disconnected")
+            except Exception as e:
+                print(f"[IMU] Disconnect error: {e}")
+
 
 
 # ============================================================================

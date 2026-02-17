@@ -32,8 +32,8 @@ try:
     )
 except ImportError:
     # Fallback if config.py doesn't exist
-    import os
-    MQTT_BROKER = "Drews-MacBook-Pro.local"
+    MQTT_BROKER_DEFAULT = "localhost"
+    MQTT_BROKER = os.environ.get("MQTT_BROKER", MQTT_BROKER_DEFAULT)
     MQTT_PORT = 1883
     MQTT_KEEPALIVE = 60
     BLUETOOTH_SPEAKER_MAC = os.environ.get("SPEAKER_MAC", "F8:7D:76:AA:A8:8C")  # <-- CHANGE THIS

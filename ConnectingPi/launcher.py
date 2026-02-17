@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
 """
 =============================================================================
-AIRWAVE LAUNCHER
+AIRWAVE LAUNCHER - Enhanced with Spotify Auto-Setup
 =============================================================================
-Unified launcher for the AirWave application.
-Runs the dashboard locally, and SSH into Pi1/Pi2 to run agents remotely.
+Unified launcher for the AirWave application with automatic Spotify configuration.
 
 Usage:
-    python launcher.py              # Run all components
-    python launcher.py --setup      # Run onboarding setup only
-    python launcher.py --dashboard  # Run dashboard only
-    python launcher.py --pi1        # Run pi1_agent only
-    python launcher.py --pi2        # Run pi2_agent only
-    python launcher.py --local      # Run agents locally (no SSH)
+    python3 launcher.py              # Run all components
+    python3 launcher.py --setup      # Run onboarding setup only
+    python3 launcher.py --dashboard  # Run dashboard only
+    python3 launcher.py --pi1        # Run pi1_agent only
+    python3 launcher.py --pi2        # Run pi2_agent only
+    python3 launcher.py --local      # Run agents locally (no SSH)
 
-First run will automatically trigger the onboarding process.
+First run will automatically trigger onboarding including Spotify setup.
 =============================================================================
 """
 
@@ -27,16 +26,33 @@ import socket
 import argparse
 import re
 import json
+import webbrowser
+import http.server
+import threading
+import urllib.parse
+import base64
 from pathlib import Path
 
 # Get the directory where this script lives
 SCRIPT_DIR = Path(__file__).parent.resolve()
 CONFIG_FILE = SCRIPT_DIR / "config.py"
+SPOTIFY_CONTROLLER = SCRIPT_DIR / "spotify_controller.py"
 DASHBOARD_DIR = SCRIPT_DIR / "dashboard"
 DASHBOARD_CONFIG = DASHBOARD_DIR / "config.js"
 LAUNCHER_CONFIG = SCRIPT_DIR / ".airwave_config.json"
+PI1_SSH_HOST = "pi1.local"
+PI2_SSH_HOST = "pi2.local"
+PI_SSH_USER = "pi"
 
-# ANSI colors for terminal output
+# Pi SSH passwords (hardcoded for convenience)
+PI1_PASSWORD = "raspberry"  # <-- CHANGE THIS to your Pi 1 password
+PI2_PASSWORD = "raspberry"  # <-- CHANGE THIS to your Pi 2 password
+
+# Default paths on the Pis (assumes user clones to ~/Team6/ConnectingPi)
+PI1_SCRIPT_PATH = "~/Team6/ConnectingPi/pi1_agent.py"
+PI2_SCRIPT_PATH = "~/Team6/ConnectingPi/pi2_agent.py"
+
+# ANSI colors
 class Colors:
     HEADER = '\033[95m'
     BLUE = '\033[94m'
@@ -48,7 +64,6 @@ class Colors:
     BOLD = '\033[1m'
 
 def print_banner():
-    """Print the AirWave banner."""
     banner = f"""
 {Colors.CYAN}{Colors.BOLD}
     ╔═══════════════════════════════════════════════════════════╗
@@ -62,7 +77,6 @@ def print_banner():
     print(banner)
 
 def print_status(message, status="info"):
-    """Print a status message with color."""
     icons = {
         "info": f"{Colors.BLUE}ℹ{Colors.ENDC}",
         "success": f"{Colors.GREEN}✓{Colors.ENDC}",
@@ -73,39 +87,237 @@ def print_status(message, status="info"):
     icon = icons.get(status, icons["info"])
     print(f"  {icon} {message}")
 
-def check_connection(host, port=22, timeout=3):
-    """Check if a host is reachable on a given port."""
+# =============================================================================
+# SPOTIFY AUTHENTICATION (embedded from spotify_auth.py)
+# =============================================================================
+
+def spotify_authenticate(client_id, client_secret):
+    """
+    Run Spotify OAuth flow and return refresh token.
+    Returns: (refresh_token, error_message)
+    """
+    redirect_uri = "http://127.0.0.1:8888/callback"
+    scopes = "user-modify-playback-state user-read-playback-state"
+    
+    auth_code = None
+    server_done = threading.Event()
+    
+    class CallbackHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            nonlocal auth_code
+            parsed = urllib.parse.urlparse(self.path)
+            params = urllib.parse.parse_qs(parsed.query)
+            
+            if "code" in params:
+                auth_code = params["code"][0]
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"""
+                    <html><body style='font-family:sans-serif;text-align:center;padding:60px'>
+                    <h2>&#10003; Authorization successful!</h2>
+                    <p>You can close this tab and return to the terminal.</p>
+                    </body></html>
+                """)
+            else:
+                error = params.get("error", ["unknown"])[0]
+                self.send_response(400)
+                self.end_headers()
+                msg = f"<html><body>Error: {error}</body></html>"
+                self.wfile.write(msg.encode())
+            
+            server_done.set()
+        
+        def log_message(self, format, *args):
+            pass  # Suppress logs
+    
+    # Start callback server
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        result = sock.connect_ex((host, port))
-        sock.close()
-        return result == 0
-    except socket.gaierror:
+        server = http.server.HTTPServer(("127.0.0.1", 8888), CallbackHandler)
+        thread = threading.Thread(target=server.handle_request)
+        thread.daemon = True
+        thread.start()
+    except Exception as e:
+        return None, f"Failed to start callback server: {e}"
+    
+    # Open browser for auth
+    auth_url = (
+        "https://accounts.spotify.com/authorize"
+        f"?client_id={client_id}"
+        f"&response_type=code"
+        f"&redirect_uri={urllib.parse.quote(redirect_uri)}"
+        f"&scope={urllib.parse.quote(scopes)}"
+    )
+    
+    print_status("Opening Spotify login in your browser...", "info")
+    print(f"  {Colors.CYAN}If browser doesn't open, visit:{Colors.ENDC}")
+    print(f"  {auth_url}\n")
+    
+    try:
+        webbrowser.open(auth_url)
+    except:
+        pass
+    
+    print_status("Waiting for authorization...", "info")
+    server_done.wait(timeout=120)
+    
+    if not auth_code:
+        return None, "No authorization code received. Did you approve the request?"
+    
+    # Exchange code for tokens
+    credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+    
+    try:
+        import requests
+    except ImportError:
+        return None, "requests library not installed. Run: pip3 install requests"
+    
+    try:
+        response = requests.post(
+            "https://accounts.spotify.com/api/token",
+            headers={
+                "Authorization": f"Basic {credentials}",
+                "Content-Type": "application/x-www-form-urlencoded"
+            },
+            data={
+                "grant_type": "authorization_code",
+                "code": auth_code,
+                "redirect_uri": redirect_uri
+            },
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            return None, f"Token exchange failed: {response.status_code} - {response.text}"
+        
+        tokens = response.json()
+        refresh_token = tokens.get("refresh_token")
+        
+        if not refresh_token:
+            return None, "No refresh token in response"
+        
+        return refresh_token, None
+        
+    except Exception as e:
+        return None, f"Token exchange error: {e}"
+
+
+def setup_spotify():
+    """Interactive Spotify setup (REQUIRED) - returns (client_id, client_secret, refresh_token) or None."""
+    print(f"\n{Colors.BOLD}━━━ Spotify Setup (Required) ━━━{Colors.ENDC}\n")
+    print("  AirWave requires Spotify Premium to function.")
+    print("  You'll need to create a Spotify Developer App (takes 2 minutes).\n")
+    
+    print(f"\n{Colors.YELLOW}Step 1: Create Spotify Developer App{Colors.ENDC}")
+    print("  1. Go to: https://developer.spotify.com/dashboard")
+    print("  2. Log in with your Spotify Premium account")
+    print("   * NOTE: it should be the same account that you will play music from!*<br><br>")
+    print("  3. Click 'Create App'")
+    print("  4. App name: 'AirWave' (or anything)")
+    print("  5. Redirect URI: http://127.0.0.1:8888/callback")
+    print("  6. Copy your Client ID and Client Secret\n")
+    
+    input(f"  Press {Colors.CYAN}Enter{Colors.ENDC} when you have your credentials ready...")
+    
+    client_id = input(f"\n  Spotify Client ID: ").strip()
+    if not client_id:
+        print_status("Client ID required. Cannot proceed without Spotify.", "error")
+        return None
+    
+    client_secret = input(f"  Spotify Client Secret: ").strip()
+    if not client_secret:
+        print_status("Client Secret required. Cannot proceed without Spotify.", "error")
+        return None
+    
+    print(f"\n{Colors.YELLOW}Step 2: Authorize AirWave{Colors.ENDC}")
+    print("  A browser window will open for you to authorize AirWave.")
+    print("  Make sure you're logged into the Spotify account you want to use!\n")
+    
+    input(f"  Press {Colors.CYAN}Enter{Colors.ENDC} to continue...")
+    
+    refresh_token, error = spotify_authenticate(client_id, client_secret)
+    
+    if error:
+        print_status(f"Spotify auth failed: {error}", "error")
+        print_status("AirWave cannot function without Spotify. Please try again.", "error")
+        return None
+    
+    print_status("Spotify authorization successful!", "success")
+    return (client_id, client_secret, refresh_token)
+
+
+def update_spotify_config(client_id, client_secret, refresh_token):
+    """Update config.py and spotify_controller.py with Spotify credentials."""
+    
+    # Update config.py
+    try:
+        config_addition = f'''
+
+# ============================================================
+# SPOTIFY API CREDENTIALS (added by launcher)
+# ============================================================
+SPOTIFY_CLIENT_ID     = "{client_id}"
+SPOTIFY_CLIENT_SECRET = "{client_secret}"
+SPOTIFY_REFRESH_TOKEN = "{refresh_token}"
+'''
+        
+        with open(CONFIG_FILE, 'r') as f:
+            content = f.read()
+        
+        # Remove existing Spotify section if present
+        content = re.sub(
+            r'\n# ={60,}\n# SPOTIFY API CREDENTIALS.*?\n# ={60,}\n.*?(?=\n# ={60,}|\Z)',
+            '',
+            content,
+            flags=re.DOTALL
+        )
+        
+        with open(CONFIG_FILE, 'a') as f:
+            f.write(config_addition)
+        
+        print_status("Updated config.py with Spotify credentials", "success")
+        
+    except Exception as e:
+        print_status(f"Failed to update config.py: {e}", "error")
         return False
-    except Exception:
+    
+    # Update spotify_controller.py
+    try:
+        with open(SPOTIFY_CONTROLLER, 'r') as f:
+            content = f.read()
+        
+        # Replace credential lines
+        content = re.sub(
+            r'SPOTIFY_CLIENT_ID\s*=\s*["\'][^"\']*["\']',
+            f'SPOTIFY_CLIENT_ID     = "{client_id}"',
+            content
+        )
+        content = re.sub(
+            r'SPOTIFY_CLIENT_SECRET\s*=\s*["\'][^"\']*["\']',
+            f'SPOTIFY_CLIENT_SECRET = "{client_secret}"',
+            content
+        )
+        content = re.sub(
+            r'SPOTIFY_REFRESH_TOKEN\s*=\s*["\'][^"\']*["\']',
+            f'SPOTIFY_REFRESH_TOKEN = "{refresh_token}"',
+            content
+        )
+        
+        with open(SPOTIFY_CONTROLLER, 'w') as f:
+            f.write(content)
+        
+        print_status("Updated spotify_controller.py with credentials", "success")
+        return True
+        
+    except Exception as e:
+        print_status(f"Failed to update spotify_controller.py: {e}", "error")
         return False
 
-def check_ssh_connection(host, user, timeout=10):
-    """Check if SSH connection works (assumes SSH keys are set up)."""
-    try:
-        result = subprocess.run(
-            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", 
-             f"{user}@{host}", "echo", "ok"],
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
 
 # =============================================================================
 # CONFIGURATION MANAGEMENT
 # =============================================================================
 
 def load_config():
-    """Load launcher configuration from JSON file."""
     if LAUNCHER_CONFIG.exists():
         try:
             with open(LAUNCHER_CONFIG, 'r') as f:
@@ -115,7 +327,6 @@ def load_config():
     return {}
 
 def save_config(config):
-    """Save launcher configuration to JSON file."""
     try:
         with open(LAUNCHER_CONFIG, 'w') as f:
             json.dump(config, f, indent=2)
@@ -125,7 +336,6 @@ def save_config(config):
         return False
 
 def get_current_broker():
-    """Read the current MQTT broker from config.py."""
     try:
         with open(CONFIG_FILE, 'r') as f:
             content = f.read()
@@ -137,7 +347,6 @@ def get_current_broker():
     return None
 
 def update_config_file(broker_address):
-    """Update the MQTT broker in config.py."""
     try:
         with open(CONFIG_FILE, 'r') as f:
             content = f.read()
@@ -156,10 +365,7 @@ def update_config_file(broker_address):
         return False
 
 def update_dashboard_config(broker_address):
-    """Create/update the dashboard config.js file."""
-    config_content = f"""// Auto-generated by launcher.py - DO NOT EDIT MANUALLY
-// Run 'python launcher.py --setup' to reconfigure
-
+    config_content = f"""// Auto-generated by launcher.py
 const MQTT_CONFIG = {{
     host: '{broker_address}',
     wsPort: 9001,
@@ -169,6 +375,7 @@ const MQTT_CONFIG = {{
 }};
 """
     try:
+        DASHBOARD_CONFIG.parent.mkdir(parents=True, exist_ok=True)
         with open(DASHBOARD_CONFIG, 'w') as f:
             f.write(config_content)
         return True
@@ -176,253 +383,204 @@ const MQTT_CONFIG = {{
         print_status(f"Failed to create dashboard config: {e}", "error")
         return False
 
-def update_dashboard_html():
-    """Update dashboard HTML to use external config.js if not already done."""
-    html_file = DASHBOARD_DIR / "index.html"
-    try:
-        with open(html_file, 'r') as f:
-            content = f.read()
-        
-        if 'src="config.js"' in content:
-            return True
-        
-        new_content = content.replace(
-            '<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>',
-            '<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>\n    <script src="config.js"></script>'
-        )
-        
-        new_content = re.sub(
-            r"const MQTT_HOST = '[^']+';.*?// <-- CHANGE THIS.*?\n",
-            "const MQTT_HOST = MQTT_CONFIG.host;  // Loaded from config.js\n",
-            new_content
-        )
-        
-        new_content = re.sub(
-            r"const MQTT_WS_PORT = \d+;.*?// WebSocket port.*?\n",
-            "const MQTT_WS_PORT = MQTT_CONFIG.wsPort;  // Loaded from config.js\n",
-            new_content
-        )
-        
-        with open(html_file, 'w') as f:
-            f.write(new_content)
-        return True
-    except Exception as e:
-        print_status(f"Failed to update dashboard HTML: {e}", "error")
-        return False
-
 def is_first_run():
-    """Check if this is the first run."""
     return not LAUNCHER_CONFIG.exists()
 
 # =============================================================================
 # ONBOARDING
 # =============================================================================
 
-def prompt_with_default(prompt, default=None):
-    """Prompt for input with an optional default value."""
-    if default:
-        user_input = input(f"  {prompt} [{default}]: ").strip()
-        return user_input if user_input else default
-    else:
-        return input(f"  {prompt}: ").strip()
-
 def run_onboarding():
-    """Run the full onboarding process."""
+    """Run setup - offers web or terminal interface."""
+    print(f"\n{Colors.BOLD}━━━ AirWave Setup ━━━{Colors.ENDC}\n")
+    
+    # Offer web-based or terminal-based setup
+    print("  Choose your setup method:")
+    print(f"  {Colors.CYAN}1. Web Interface{Colors.ENDC} (recommended)")
+    print(f"  {Colors.CYAN}2. Terminal{Colors.ENDC} (for advanced users)\n")
+    
+    choice = input("  Enter choice (1 or 2) [1]: ").strip()
+    
+    if choice == "2":
+        # Terminal-based setup
+        return run_terminal_setup()
+    else:
+        # Web-based setup (default)
+        return run_web_setup_flow()
+
+
+def run_web_setup_flow():
+    """Run web-based setup and return config."""
+    print(f"\n{Colors.CYAN}Opening web setup interface...{Colors.ENDC}\n")
+    
+    # Import and run web setup
+    try:
+        from web_setup_embedded import run_web_setup
+        web_config = run_web_setup()
+        
+        if not web_config:
+            print_status("Setup cancelled", "warning")
+            return {}
+        
+        # Process web config into launcher config
+        config = {}
+        config['mqtt_broker'] = web_config.get('mqtt_broker', 'localhost')
+        
+        # Update config.py with MQTT broker
+        update_config_file(config['mqtt_broker'])
+        update_dashboard_config(config['mqtt_broker'])
+        
+        # Handle Spotify (always required)
+        client_id = web_config.get('spotify_client_id')
+        client_secret = web_config.get('spotify_client_secret')
+        
+        if client_id and client_secret:
+            print_status("Authorizing Spotify...", "info")
+            refresh_token, error = spotify_authenticate(client_id, client_secret)
+            
+            if refresh_token:
+                update_spotify_config(client_id, client_secret, refresh_token)
+                config['spotify_configured'] = True
+                print_status("Spotify configured successfully!", "success")
+            else:
+                print_status(f"Spotify auth failed: {error}", "error")
+                config['spotify_configured'] = False
+        else:
+            config['spotify_configured'] = False
+        
+        # Save Pi paths
+        config['pi1_host'] = PI1_SSH_HOST
+        config['pi1_path'] = PI1_SCRIPT_PATH
+        config['pi2_host'] = PI2_SSH_HOST
+        config['pi2_path'] = PI2_SCRIPT_PATH
+        
+        save_config(config)
+        
+        if not config.get('spotify_configured'):
+            print(f"\n{Colors.RED}━━━ Setup Incomplete ━━━{Colors.ENDC}\n")
+            print_status("Spotify is required for AirWave to function", "error")
+            print(f"  Run {Colors.CYAN}python3 launcher.py --setup{Colors.ENDC} to try again.\n")
+        else:
+            print(f"\n{Colors.GREEN}━━━ Setup Complete! ━━━{Colors.ENDC}\n")
+            print_status("Configuration saved", "success")
+        
+        return config
+        
+    except ImportError:
+        print_status("Web setup module not found (web_setup_embedded.py).", "error")
+        print_status("Make sure web_setup_embedded.py is in the same directory as launcher.py", "error")
+        print_status("Falling back to terminal setup...", "warning")
+        return run_terminal_setup()
+
+
+def run_terminal_setup():
+    print(f"\n{Colors.BOLD}━━━ AirWave Setup ━━━{Colors.ENDC}\n")
+    
     config = load_config()
     
-    # ===================
-    # MQTT BROKER SETUP
-    # ===================
-    print(f"\n{Colors.BOLD}━━━ Step 1: MQTT Broker Configuration ━━━{Colors.ENDC}\n")
+    # 1. MQTT Broker
+    print(f"{Colors.BOLD}1. MQTT Broker Configuration{Colors.ENDC}\n")
+    print("  Run this on your Mac to get the hostname:")
+    print(f"  {Colors.CYAN}echo \"$(scutil --get LocalHostName).local\"{Colors.ENDC}\n")
     
     current_broker = config.get('mqtt_broker') or get_current_broker()
-    
-    print(f"""  {Colors.YELLOW}Enter your MQTT broker address.{Colors.ENDC}
-  This is the computer running Mosquitto (usually your Mac/PC).
-  Examples: My-MacBook.local, 192.168.1.100, localhost
-""")
-    
-    while True:
-        broker = prompt_with_default("MQTT Broker address", current_broker)
-        
+    if current_broker:
+        broker = input(f"  MQTT Broker [{current_broker}]: ").strip()
         if not broker:
-            print_status("Please enter a valid address", "warning")
-            continue
-        
-        print_status(f"Testing MQTT connection to {broker}:1883...", "info")
-        
-        if check_connection(broker, 1883):
-            print_status("MQTT broker is reachable!", "success")
-            config['mqtt_broker'] = broker
-            break
-        else:
-            print_status(f"Could not connect to {broker}:1883", "warning")
-            proceed = input("  Continue anyway? [y/N]: ").strip().lower()
-            if proceed == 'y':
-                config['mqtt_broker'] = broker
-                break
-    
-    # ===================
-    # PI1 SETUP
-    # ===================
-    print(f"\n{Colors.BOLD}━━━ Step 2: Raspberry Pi 1 (Gesture Sensor) ━━━{Colors.ENDC}\n")
-    
-    print(f"""  {Colors.YELLOW}Configure the Pi that runs the IMU/gesture sensor.{Colors.ENDC}
-  Leave blank to skip (won't launch Pi1 agent).
-""")
-    
-    pi1_host = prompt_with_default("Pi1 hostname or IP", config.get('pi1_host', ''))
-    
-    if pi1_host:
-        pi1_user = prompt_with_default("Pi1 username", config.get('pi1_user', 'pi'))
-        pi1_path = prompt_with_default(
-            "Path to pi1_agent.py on Pi1", 
-            config.get('pi1_path', '~/AirWave/pi1_agent.py')
-        )
-        
-        print_status(f"Testing SSH connection to {pi1_user}@{pi1_host}...", "info")
-        
-        if check_ssh_connection(pi1_host, pi1_user):
-            print_status("SSH connection successful!", "success")
-        else:
-            print_status("SSH connection failed", "warning")
-            print(f"""
-  {Colors.YELLOW}Make sure:{Colors.ENDC}
-    1. Pi1 is powered on and connected to the network
-    2. SSH is enabled on Pi1
-    3. SSH keys are set up (run: ssh-copy-id {pi1_user}@{pi1_host})
-""")
-        
-        config['pi1_host'] = pi1_host
-        config['pi1_user'] = pi1_user
-        config['pi1_path'] = pi1_path
+            broker = current_broker
     else:
-        config['pi1_host'] = ''
-        print_status("Pi1 skipped - will not launch pi1_agent", "info")
+        broker = input(f"  MQTT Broker: ").strip()
+        if not broker:
+            broker = "localhost"
     
-    # ===================
-    # PI2 SETUP
-    # ===================
-    print(f"\n{Colors.BOLD}━━━ Step 3: Raspberry Pi 2 (Camera/Display) ━━━{Colors.ENDC}\n")
+    config['mqtt_broker'] = broker
+    update_config_file(broker)
+    update_dashboard_config(broker)
+    print_status(f"MQTT Broker set to: {broker}", "success")
     
-    print(f"""  {Colors.YELLOW}Configure the Pi that runs the camera/face detection.{Colors.ENDC}
-  Leave blank to skip (won't launch Pi2 agent).
-""")
-    
-    pi2_host = prompt_with_default("Pi2 hostname or IP", config.get('pi2_host', ''))
-    
-    if pi2_host:
-        pi2_user = prompt_with_default("Pi2 username", config.get('pi2_user', 'pi'))
-        pi2_path = prompt_with_default(
-            "Path to pi2_agent.py on Pi2", 
-            config.get('pi2_path', '~/AirWave/pi2_agent.py')
-        )
-        
-        print_status(f"Testing SSH connection to {pi2_user}@{pi2_host}...", "info")
-        
-        if check_ssh_connection(pi2_host, pi2_user):
-            print_status("SSH connection successful!", "success")
-        else:
-            print_status("SSH connection failed", "warning")
-            print(f"""
-  {Colors.YELLOW}Make sure:{Colors.ENDC}
-    1. Pi2 is powered on and connected to the network
-    2. SSH is enabled on Pi2
-    3. SSH keys are set up (run: ssh-copy-id {pi2_user}@{pi2_host})
-""")
-        
-        config['pi2_host'] = pi2_host
-        config['pi2_user'] = pi2_user
-        config['pi2_path'] = pi2_path
+    # 2. Spotify Setup
+    spotify_creds = setup_spotify()
+    if spotify_creds:
+        client_id, client_secret, refresh_token = spotify_creds
+        update_spotify_config(client_id, client_secret, refresh_token)
+        config['spotify_configured'] = True
     else:
-        config['pi2_host'] = ''
-        print_status("Pi2 skipped - will not launch pi2_agent", "info")
+        config['spotify_configured'] = False
     
-    # ===================
-    # SAVE CONFIGURATION
-    # ===================
-    print(f"\n{Colors.BOLD}━━━ Saving Configuration ━━━{Colors.ENDC}\n")
+    # 3. Save Pi paths (hardcoded defaults)
+    config['pi1_host'] = PI1_SSH_HOST
+    config['pi1_path'] = PI1_SCRIPT_PATH
+    config['pi2_host'] = PI2_SSH_HOST
+    config['pi2_path'] = PI2_SCRIPT_PATH
     
-    # Save launcher config
+    # 4. Save config
     save_config(config)
-    print_status("Saved .airwave_config.json", "success")
     
-    # Update config.py
-    if update_config_file(config['mqtt_broker']):
-        print_status("Updated config.py", "success")
-    
-    # Update dashboard config
-    if update_dashboard_config(config['mqtt_broker']):
-        print_status("Created dashboard/config.js", "success")
-    
-    if update_dashboard_html():
-        print_status("Updated dashboard/index.html", "success")
-    
-    # Set environment variable
-    os.environ['MQTT_BROKER'] = config['mqtt_broker']
-    
-    # Print summary
-    print(f"\n{Colors.BOLD}━━━ Configuration Summary ━━━{Colors.ENDC}\n")
-    print(f"  MQTT Broker:  {Colors.CYAN}{config['mqtt_broker']}{Colors.ENDC}")
-    if config.get('pi1_host'):
-        print(f"  Pi1:          {Colors.GREEN}{config['pi1_user']}@{config['pi1_host']}{Colors.ENDC}")
-        print(f"                {config['pi1_path']}")
+    if not config.get('spotify_configured'):
+        print(f"\n{Colors.RED}━━━ Setup Incomplete ━━━{Colors.ENDC}\n")
+        print_status("Spotify is required for AirWave to function", "error")
+        print(f"  Run {Colors.CYAN}python3 launcher.py --setup{Colors.ENDC} to try again.\n")
     else:
-        print(f"  Pi1:          {Colors.YELLOW}(not configured){Colors.ENDC}")
-    if config.get('pi2_host'):
-        print(f"  Pi2:          {Colors.GREEN}{config['pi2_user']}@{config['pi2_host']}{Colors.ENDC}")
-        print(f"                {config['pi2_path']}")
-    else:
-        print(f"  Pi2:          {Colors.YELLOW}(not configured){Colors.ENDC}")
-    
-    print(f"\n  {Colors.GREEN}✓ Setup complete!{Colors.ENDC}\n")
+        print(f"\n{Colors.GREEN}━━━ Setup Complete! ━━━{Colors.ENDC}\n")
+        print_status("Configuration saved", "success")
+        print_status(f"Pi1 script: {PI1_SCRIPT_PATH}", "info")
+        print_status(f"Pi2 script: {PI2_SCRIPT_PATH}", "info")
     
     return config
 
+
 # =============================================================================
-# PROCESS MANAGEMENT
+# PROCESS MANAGEMENT (same as before)
 # =============================================================================
 
 class ProcessManager:
-    """Manages subprocess lifecycle (local and SSH)."""
-    
     def __init__(self):
         self.processes = {}
         self.running = True
-        
+    
     def start_local_process(self, name, cmd, cwd=None):
-        """Start a local subprocess."""
         try:
-            env = os.environ.copy()
             process = subprocess.Popen(
                 cmd,
-                cwd=cwd or SCRIPT_DIR,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
-                env=env
+                cwd=cwd
             )
             self.processes[name] = {'process': process, 'type': 'local'}
-            print_status(f"{name} started locally (PID: {process.pid})", "running")
+            print_status(f"{name} started (PID: {process.pid})", "running")
             return process
         except Exception as e:
             print_status(f"Failed to start {name}: {e}", "error")
             return None
     
-    def start_ssh_process(self, name, host, user, remote_cmd, mqtt_broker=None):
-        """Start a remote process via SSH."""
+    def start_ssh_process(self, name, host, user, remote_cmd, mqtt_broker=None, password=None):
         try:
-            # Build SSH command with environment variable
             env_prefix = f"MQTT_BROKER={mqtt_broker} " if mqtt_broker else ""
-            ssh_cmd = [
-                "ssh",
-                "-o", "StrictHostKeyChecking=no",
-                "-o", "ServerAliveInterval=30",
-                "-tt",  # Force pseudo-terminal for better signal handling
-                f"{user}@{host}",
-                f"{env_prefix}python3 {remote_cmd}"
-            ]
+            
+            # Build SSH command with password if provided
+            if password:
+                # Use sshpass for password authentication
+                ssh_cmd = [
+                    "sshpass", "-p", password,
+                    "ssh",
+                    "-o", "StrictHostKeyChecking=no",
+                    "-o", "ServerAliveInterval=30",
+                    "-tt",
+                    f"{user}@{host}",
+                    f"{env_prefix}python3 {remote_cmd}"
+                ]
+            else:
+                # Use regular SSH (assumes SSH keys are set up)
+                ssh_cmd = [
+                    "ssh",
+                    "-o", "StrictHostKeyChecking=no",
+                    "-o", "ServerAliveInterval=30",
+                    "-tt",
+                    f"{user}@{host}",
+                    f"{env_prefix}python3 {remote_cmd}"
+                ]
             
             process = subprocess.Popen(
                 ssh_cmd,
@@ -434,12 +592,17 @@ class ProcessManager:
             self.processes[name] = {'process': process, 'type': 'ssh', 'host': host, 'user': user}
             print_status(f"{name} started via SSH on {user}@{host} (PID: {process.pid})", "running")
             return process
+        except FileNotFoundError as e:
+            if "sshpass" in str(e):
+                print_status(f"sshpass not found. Install it with: brew install hudochenkov/sshpass/sshpass", "error")
+            else:
+                print_status(f"Failed to start {name}: {e}", "error")
+            return None
         except Exception as e:
             print_status(f"Failed to start {name}: {e}", "error")
             return None
     
     def stop_all(self):
-        """Stop all running processes."""
         self.running = False
         print(f"\n{Colors.YELLOW}Shutting down...{Colors.ENDC}")
         
@@ -456,7 +619,6 @@ class ProcessManager:
         print_status("All processes stopped", "success")
     
     def monitor_output(self):
-        """Monitor and print output from all processes."""
         while self.running:
             for name, info in list(self.processes.items()):
                 process = info['process']
@@ -485,7 +647,6 @@ class ProcessManager:
             
             time.sleep(0.1)
             
-            # Exit if all processes have stopped
             if not self.processes:
                 print_status("All processes have exited", "info")
                 break
@@ -495,27 +656,35 @@ class ProcessManager:
 # =============================================================================
 
 def prompt_mqtt_broker():
-    """Quick prompt for MQTT broker address before starting."""
     config = load_config()
     current_broker = config.get('mqtt_broker') or get_current_broker()
     
-    print(f"\n{Colors.BOLD}━━━ MQTT Broker ━━━{Colors.ENDC}\n")
+    print(f"\n{Colors.BOLD}━━━ Quick Start ━━━{Colors.ENDC}\n")
     
     if current_broker:
-        broker = input(f"  MQTT Broker [{current_broker}]: ").strip()
-        if not broker:
+        print(f"  Current MQTT Broker: {Colors.CYAN}{current_broker}{Colors.ENDC}")
+        print(f"\n  Press Enter to continue, or type:")
+        print(f"  • {Colors.CYAN}'setup'{Colors.ENDC} for complete re-setup")
+        print(f"  • {Colors.CYAN}new hostname{Colors.ENDC} to change MQTT broker\n")
+        
+        response = input(f"  [{Colors.GREEN}Enter to continue{Colors.ENDC}]: ").strip()
+        
+        if response.lower() == 'setup':
+            return None, run_onboarding()  # Trigger full setup
+        elif response:
+            broker = response
+        else:
             broker = current_broker
     else:
+        print(f"  {Colors.GREEN}Run: echo \"$(scutil --get LocalHostName).local\" on your Mac{Colors.ENDC}\n")
         broker = input(f"  MQTT Broker: ").strip()
         if not broker:
             broker = "localhost"
     
-    # Save to all config locations
     config['mqtt_broker'] = broker
     save_config(config)
     update_config_file(broker)
     update_dashboard_config(broker)
-    update_dashboard_html()
     os.environ['MQTT_BROKER'] = broker
     
     print_status(f"Using MQTT Broker: {Colors.CYAN}{broker}{Colors.ENDC}", "success")
@@ -550,19 +719,20 @@ def main():
         print(f"  {Colors.YELLOW}First time setup detected!{Colors.ENDC}")
         config = run_onboarding()
     else:
-        # Quick MQTT broker prompt before starting
         mqtt_broker, config = prompt_mqtt_broker()
+        # If user typed 'setup', config will be from run_onboarding()
+        if mqtt_broker is None:
+            # Full setup was run, mqtt_broker already set in config
+            mqtt_broker = config.get('mqtt_broker', 'localhost')
     
     # Ensure dashboard config exists
     if not DASHBOARD_CONFIG.exists():
         broker = config.get('mqtt_broker') or get_current_broker() or "localhost"
         update_dashboard_config(broker)
-        update_dashboard_html()
     
     # Set up process manager
     manager = ProcessManager()
     
-    # Handle Ctrl+C
     def signal_handler(sig, frame):
         manager.stop_all()
         sys.exit(0)
@@ -574,67 +744,87 @@ def main():
     
     mqtt_broker = config.get('mqtt_broker', 'localhost')
     
-    # Start dashboard server (always local)
+    # Start Mosquitto MQTT broker first
+    print_status("Starting Mosquitto MQTT broker...", "info")
+    try:
+        # Check if mosquitto is already running
+        check_running = subprocess.run(
+            ["pgrep", "-x", "mosquitto"],
+            capture_output=True
+        )
+        
+        if check_running.returncode == 0:
+            print_status("Mosquitto already running", "success")
+        else:
+            # Start mosquitto
+            mosquitto_process = subprocess.Popen(
+                ["mosquitto", "-c", "/opt/homebrew/etc/mosquitto/mosquitto.conf"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            time.sleep(1)  # Give it a moment to start
+            
+            # Verify it started
+            verify = subprocess.run(["pgrep", "-x", "mosquitto"], capture_output=True)
+            if verify.returncode == 0:
+                print_status("Mosquitto started successfully", "success")
+                manager.processes["Mosquitto"] = {'process': mosquitto_process, 'type': 'local'}
+            else:
+                print_status("Mosquitto may not have started correctly", "warning")
+    except FileNotFoundError:
+        print_status("mosquitto not found. Install with: brew install mosquitto", "error")
+        print_status("Or start manually: brew services start mosquitto", "warning")
+    except Exception as e:
+        print_status(f"Could not start mosquitto: {e}", "warning")
+        print_status("Try running manually: brew services start mosquitto", "info")
+    
+    # Start dashboard
     if run_dashboard:
         manager.start_local_process(
             "Dashboard",
-            [sys.executable, "-m", "http.server", "8080"],
+            ["python3", "-m", "http.server", "8080"],
             cwd=DASHBOARD_DIR
         )
-        print_status(f"Dashboard available at: {Colors.CYAN}http://localhost:8080{Colors.ENDC}", "info")
+        print_status(f"Dashboard: {Colors.CYAN}http://localhost:8080{Colors.ENDC}", "info")
+        
+        # Open browser automatically after a short delay
+        def open_browser():
+            time.sleep(2)  # Wait for server to be ready
+            try:
+                webbrowser.open("http://localhost:8080")
+                print_status("Opened dashboard in browser", "success")
+            except Exception:
+                pass
+        
+        threading.Thread(target=open_browser, daemon=True).start()
     
     # Start pi1_agent
     if run_pi1:
         if args.local:
-            # Run locally
             pi1_script = SCRIPT_DIR / "pi1_agent.py"
             if pi1_script.exists():
-                manager.start_local_process(
-                    "Pi1 Agent",
-                    [sys.executable, str(pi1_script)]
-                )
+                manager.start_local_process("Pi1 Agent", ["python3", str(pi1_script)])
             else:
                 print_status("pi1_agent.py not found locally", "warning")
-        elif config.get('pi1_host'):
-            # Run via SSH
-            manager.start_ssh_process(
-                "Pi1 Agent",
-                config['pi1_host'],
-                config['pi1_user'],
-                config['pi1_path'],
-                mqtt_broker
-            )
         else:
-            print_status("Pi1 not configured - run 'python launcher.py --setup'", "warning")
+            # Use hardcoded path and password
+            manager.start_ssh_process("Pi1 Agent", PI1_SSH_HOST, PI_SSH_USER, PI1_SCRIPT_PATH, mqtt_broker, PI1_PASSWORD)
     
     # Start pi2_agent
     if run_pi2:
         if args.local:
-            # Run locally
             pi2_script = SCRIPT_DIR / "pi2_agent.py"
             if pi2_script.exists():
-                manager.start_local_process(
-                    "Pi2 Agent",
-                    [sys.executable, str(pi2_script)]
-                )
+                manager.start_local_process("Pi2 Agent", ["python3", str(pi2_script)])
             else:
                 print_status("pi2_agent.py not found locally", "warning")
-        elif config.get('pi2_host'):
-            # Run via SSH
-            manager.start_ssh_process(
-                "Pi2 Agent",
-                config['pi2_host'],
-                config['pi2_user'],
-                config['pi2_path'],
-                mqtt_broker
-            )
         else:
-            print_status("Pi2 not configured - run 'python launcher.py --setup'", "warning")
+            # Use hardcoded path and password
+            manager.start_ssh_process("Pi2 Agent", PI2_SSH_HOST, PI_SSH_USER, PI2_SCRIPT_PATH, mqtt_broker, PI2_PASSWORD)
     
     print(f"\n{Colors.BOLD}━━━ Running ━━━{Colors.ENDC}")
-    print(f"  Press {Colors.YELLOW}Ctrl+C{Colors.ENDC} to stop all services\n")
+    print(f"  Press {Colors.YELLOW}Ctrl+C{Colors.ENDC} to stop\n")
     
-    # Monitor process output
     try:
         manager.monitor_output()
     except KeyboardInterrupt:

@@ -5,6 +5,8 @@ SHARED CONFIGURATION FILE
 =============================================================================
 Edit this file when transferring code to a new computer/setup.
 Both pi1_agent.py and pi2_agent.py import settings from here.
+
+For new users: Run 'python3 launcher.py' and follow the setup wizard!
 =============================================================================
 """
 
@@ -20,7 +22,7 @@ import os
 #   Change "YOUR-COMPUTER-NAME.local" to your computer's hostname
 #   Examples: "Drews-MacBook-Pro.local", "raspberrypi.local", "192.168.1.100"
 
-MQTT_BROKER_DEFAULT = "Drews-MacBook-Pro.local"  # <-- CHANGE THIS
+MQTT_BROKER_DEFAULT = "Leahs-MacBook-Pro.local"  # <-- CHANGE THIS
 MQTT_BROKER = os.environ.get("MQTT_BROKER", MQTT_BROKER_DEFAULT)
 MQTT_PORT = 1883
 MQTT_KEEPALIVE = 60
@@ -70,10 +72,41 @@ EYE_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_eye.xml")
 SMILE_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_smile.xml")
 
 # ============================================================================
+# SPOTIFY API CREDENTIALS
+# ============================================================================
+# These are automatically configured by running: python3 launcher.py --setup
+# 
+# If you need to manually set them:
+#   1. Go to: https://developer.spotify.com/dashboard
+#   2. Create an app with redirect URI: http://127.0.0.1:8888/callback
+#   3. Copy your Client ID, Client Secret, and get a Refresh Token
+#
+# OR just run the setup wizard: python3 launcher.py --setup
+
+# Placeholder values - will be replaced by launcher during setup
+SPOTIFY_CLIENT_ID = os.environ.get("SPOTIFY_CLIENT_ID", "")
+SPOTIFY_CLIENT_SECRET = os.environ.get("SPOTIFY_CLIENT_SECRET", "")
+SPOTIFY_REFRESH_TOKEN = os.environ.get("SPOTIFY_REFRESH_TOKEN", "")
+
+# Note: The launcher will append actual credentials here when you run setup.
+# The above lines are just fallbacks for environment variable support.
+
+# ============================================================================
 # QUICK SETUP INSTRUCTIONS
 # ============================================================================
+# NEW USERS: Just run 'python3 launcher.py' and follow the interactive setup!
+#
+# The launcher will:
+#   1. Ask for your Mac's hostname (for MQTT broker)
+#   2. Guide you through Spotify Developer App creation
+#   3. Open your browser to authorize Spotify
+#   4. Automatically save all credentials to this file
+#   5. Start AirWave!
+#
+# MANUAL SETUP (if needed):
+#
 # 1. Find your computer's hostname:
-#    - Mac: System Preferences > Sharing > Computer Name
+#    - Mac: echo "$(scutil --get LocalHostName).local"
 #    - Linux: hostname
 #    - Or use IP address: ifconfig | grep "inet "
 #
@@ -85,4 +118,14 @@ SMILE_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_smile.xml")
 #    export MQTT_BROKER="your-computer.local"
 #    export IMU_MAC="XX:XX:XX:XX:XX:XX"
 #    export SPEAKER_MAC="XX:XX:XX:XX:XX:XX"
+#    export SPOTIFY_CLIENT_ID="your_client_id"
+#    export SPOTIFY_CLIENT_SECRET="your_client_secret"
+#    export SPOTIFY_REFRESH_TOKEN="your_refresh_token"
 # ============================================================================
+
+# ============================================================
+# SPOTIFY API CREDENTIALS (added by launcher)
+# ============================================================
+SPOTIFY_CLIENT_ID     = "ca36b53326bb4d309a48603af9f0be8d"
+SPOTIFY_CLIENT_SECRET = "dd70d34f38e84e5fbea1345cfd636389"
+SPOTIFY_REFRESH_TOKEN = "AQA3fvvGDHACM0Z8EdCHx_sdN-3YJlYLl37WCVFzeR9oBHlPPktuYaLYxuJoOIZ0h64bB4gRlsbG0k20byfi4otkECegxZpjyOtkPo-Ls79YN7B4ydcHzsKBXS4r54BIEHY"
