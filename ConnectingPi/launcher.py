@@ -210,7 +210,6 @@ def setup_spotify():
     print(f"\n{Colors.YELLOW}Step 1: Create Spotify Developer App{Colors.ENDC}")
     print("  1. Go to: https://developer.spotify.com/dashboard")
     print("  2. Log in with your Spotify Premium account")
-    print("   * NOTE: it should be the same account that you will play music from!*<br><br>")
     print("  3. Click 'Create App'")
     print("  4. App name: 'AirWave' (or anything)")
     print("  5. Redirect URI: http://127.0.0.1:8888/callback")
@@ -691,6 +690,100 @@ def prompt_mqtt_broker():
     
     return broker, config
 
+# =============================================================================
+# DEPENDENCY CHECKER
+# =============================================================================
+
+def check_and_install_dependencies():
+    """Check for all required dependencies and install missing ones automatically."""
+    
+    print(f"\n{Colors.BOLD}━━━ Checking Dependencies ━━━{Colors.ENDC}\n")
+    
+    all_good = True
+    
+    # ── Python packages ──────────────────────────────────────────────────────
+    python_packages = [
+        ("requests",   "requests"),
+        ("paho.mqtt",  "paho-mqtt"),
+        ("urllib3",    "urllib3"),
+    ]
+    
+    for import_name, pip_name in python_packages:
+        try:
+            __import__(import_name)
+            print_status(f"{pip_name}", "success")
+        except ImportError:
+            print_status(f"{pip_name} not found — installing...", "warning")
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", pip_name],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                print_status(f"{pip_name} installed successfully", "success")
+            else:
+                print_status(f"Failed to install {pip_name}. Run: pip3 install {pip_name}", "error")
+                all_good = False
+    
+    # ── Homebrew tools ───────────────────────────────────────────────────────
+    
+    # Check Homebrew itself first
+    brew_available = subprocess.run(
+        ["which", "brew"], capture_output=True
+    ).returncode == 0
+    
+    if not brew_available:
+        print_status("Homebrew not found — required to install system tools", "error")
+        print(f"\n  Install Homebrew first:")
+        print(f"  {Colors.CYAN}/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"{Colors.ENDC}\n")
+        print(f"  Then re-run: {Colors.CYAN}python3 launcher.py{Colors.ENDC}\n")
+        sys.exit(1)
+    
+    # mosquitto
+    mosquitto_ok = (
+        subprocess.run(["which", "mosquitto"], capture_output=True).returncode == 0
+        or Path("/opt/homebrew/sbin/mosquitto").exists()   # Apple Silicon
+        or Path("/usr/local/sbin/mosquitto").exists()      # Intel Mac
+    )
+    
+    if mosquitto_ok:
+        print_status("mosquitto", "success")
+    else:
+        print_status("mosquitto not found — installing...", "warning")
+        result = subprocess.run(["brew", "install", "mosquitto"], capture_output=True, text=True)
+        if result.returncode == 0:
+            print_status("mosquitto installed successfully", "success")
+        else:
+            print_status("Failed to install mosquitto. Run: brew install mosquitto", "error")
+            all_good = False
+    
+    # sshpass
+    sshpass_ok = subprocess.run(
+        ["which", "sshpass"], capture_output=True
+    ).returncode == 0
+    
+    if sshpass_ok:
+        print_status("sshpass", "success")
+    else:
+        print_status("sshpass not found — installing...", "warning")
+        result = subprocess.run(
+            ["brew", "install", "hudochenkov/sshpass/sshpass"],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            print_status("sshpass installed successfully", "success")
+        else:
+            print_status("Failed to install sshpass. Run: brew install hudochenkov/sshpass/sshpass", "error")
+            all_good = False
+    
+    # ── Summary ──────────────────────────────────────────────────────────────
+    if all_good:
+        print(f"\n  {Colors.GREEN}All dependencies satisfied!{Colors.ENDC}\n")
+    else:
+        print(f"\n  {Colors.RED}Some dependencies could not be installed automatically.{Colors.ENDC}")
+        print(f"  Please install them manually and re-run launcher.py\n")
+        sys.exit(1)
+
+
 def main():
     parser = argparse.ArgumentParser(description="AirWave Launcher")
     parser.add_argument('--setup', action='store_true', help='Run onboarding setup only')
@@ -701,6 +794,9 @@ def main():
     args = parser.parse_args()
     
     print_banner()
+    
+    # Check and install dependencies before anything else
+    check_and_install_dependencies()
     
     # Determine what to run
     run_all = not (args.dashboard or args.pi1 or args.pi2 or args.setup)
