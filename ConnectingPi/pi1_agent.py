@@ -972,7 +972,7 @@ def run_voice_detection(loop: asyncio.AbstractEventLoop):
 
     # Make behavior consistent (avoid drift / long phrases)
     r.dynamic_energy_threshold = False
-    r.energy_threshold = int(os.environ.get("VOICE_ENERGY", "350"))
+    r.energy_threshold = int(os.environ.get("VOICE_ENERGY", "700"))
     r.pause_threshold = float(os.environ.get("VOICE_PAUSE_THRESHOLD", "0.35"))
     r.non_speaking_duration = float(os.environ.get("VOICE_NON_SPEAKING_DURATION", "0.20"))
 
@@ -1075,7 +1075,7 @@ def run_voice_detection(loop: asyncio.AbstractEventLoop):
                     if not final_text and partial_text:
                         # Check if partial contains any command word
                         cmd_from_partial = map_voice_command_strict(partial_text)
-                        if cmd_from_partial:
+                        if cmd_from_partial and cmd_from_partial not in ("PREV_TRACK"):
                             # We found a valid command in the partial!
                             # Use it immediately without waiting for stability
                             final_text = partial_text
