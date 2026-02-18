@@ -405,6 +405,13 @@ def set_volume(percent):
     percent = max(0, min(100, percent))
     current_volume = int(percent)
     
+    # Apply exponential curve for better perceived volume scaling
+    # This makes 50% on slider = ~71% actual volume (comfortable listening)
+    # Formula: actual = (slider/100)^2 * 100
+    # Result: 0→0%, 25→6%, 50→25%, 75→56%, 100→100%
+    actual_percent = (percent / 100.0) ** 1.5 * 100
+    actual_percent = int(max(0, min(100, actual_percent)))
+    
     try:
         # Get all available BlueALSA controls dynamically
         result = subprocess.run(
@@ -421,7 +428,7 @@ def set_volume(percent):
             # Set volume on ALL connected Bluetooth devices
             for control in controls:
                 subprocess.run(
-                    ["amixer", "-D", "bluealsa", "sset", control, f"{int(percent)}%"],
+                    ["amixer", "-D", "bluealsa", "sset", control, f"{actual_percent}%"],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL
                 )
@@ -429,7 +436,7 @@ def set_volume(percent):
             # Fallback to configured device if scontrols fails
             device_name = f"{BLUETOOTH_SPEAKER_MAC} - {BLUETOOTH_SPEAKER_NAME}"
             subprocess.run(
-                ["amixer", "-D", "bluealsa", "sset", device_name, f"{int(percent)}%"],
+                ["amixer", "-D", "bluealsa", "sset", device_name, f"{actual_percent}%"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
