@@ -33,6 +33,9 @@ import urllib.parse
 import base64
 from pathlib import Path
 
+# Debug mode - set to True to enable verbose logging
+DEBUG = os.environ.get('AIRWAVE_DEBUG', '').lower() in ('1', 'true', 'yes')
+
 # Get the directory where this script lives
 SCRIPT_DIR = Path(__file__).parent.resolve()
 CONFIG_FILE = SCRIPT_DIR / "config.py"
@@ -48,9 +51,9 @@ PI_SSH_USER = "pi"
 PI1_PASSWORD = "raspberry"  # <-- CHANGE THIS to your Pi 1 password
 PI2_PASSWORD = "raspberry"  # <-- CHANGE THIS to your Pi 2 password
 
-# Default paths on the Pis (assumes user clones to ~/Team6/ConnectingPi)
-PI1_SCRIPT_PATH = "~/Team6/ConnectingPi/pi1_agent.py"
-PI2_SCRIPT_PATH = "~/Team6/ConnectingPi/pi2_agent.py"
+# Default paths on the Pis (assumes user clones to ~/FinalVersion/Team6/ConnectingPi)
+PI1_SCRIPT_PATH = "~/FinalVersion/Team6/ConnectingPi/pi1_agent.py"
+PI2_SCRIPT_PATH = "~/FinalVersion/Team6/ConnectingPi/pi2_agent.py"
 
 # ANSI colors
 class Colors:
@@ -75,6 +78,8 @@ def print_banner():
     ╚═══════════════════════════════════════════════════════════╝
 {Colors.ENDC}"""
     print(banner)
+    if DEBUG:
+        print(f"{Colors.YELLOW}    [DEBUG MODE ENABLED - Verbose logging active]{Colors.ENDC}\n")
 
 def print_status(message, status="info"):
     icons = {
@@ -86,6 +91,15 @@ def print_status(message, status="info"):
     }
     icon = icons.get(status, icons["info"])
     print(f"  {icon} {message}")
+
+def debug(message, data=None):
+    """Print debug message if DEBUG mode is enabled."""
+    if DEBUG:
+        timestamp = time.strftime("%H:%M:%S")
+        print(f"  {Colors.CYAN}[DEBUG {timestamp}]{Colors.ENDC} {message}")
+        if data is not None:
+            import pprint
+            pprint.pprint(data, indent=4, width=80)
 
 # =============================================================================
 # SPOTIFY AUTHENTICATION (embedded from spotify_auth.py)
@@ -556,6 +570,13 @@ class ProcessManager:
     
     def start_ssh_process(self, name, host, user, remote_cmd, mqtt_broker=None, password=None):
         try:
+            debug(f"Starting SSH process: {name}")
+            debug(f"  Host: {host}")
+            debug(f"  User: {user}")
+            debug(f"  Remote command: {remote_cmd}")
+            debug(f"  MQTT broker: {mqtt_broker}")
+            debug(f"  Using password: {bool(password)}")
+            
             env_prefix = f"MQTT_BROKER={mqtt_broker} " if mqtt_broker else ""
             
             # Build SSH command with password if provided
@@ -570,6 +591,7 @@ class ProcessManager:
                     f"{user}@{host}",
                     f"{env_prefix}python3 {remote_cmd}"
                 ]
+                debug(f"  Using password authentication")
             else:
                 # Use regular SSH (assumes SSH keys are set up)
                 ssh_cmd = [
@@ -580,6 +602,11 @@ class ProcessManager:
                     f"{user}@{host}",
                     f"{env_prefix}python3 {remote_cmd}"
                 ]
+                debug(f"  Using SSH key authentication")
+            
+            # Obscure password in debug output
+            debug_cmd = [c if c != password else "***" for c in ssh_cmd]
+            debug(f"  SSH command: {' '.join(debug_cmd)}")
             
             process = subprocess.Popen(
                 ssh_cmd,
@@ -589,15 +616,18 @@ class ProcessManager:
                 bufsize=1,
             )
             self.processes[name] = {'process': process, 'type': 'ssh', 'host': host, 'user': user}
+            debug(f"  Process started with PID: {process.pid}")
             print_status(f"{name} started via SSH on {user}@{host} (PID: {process.pid})", "running")
             return process
         except FileNotFoundError as e:
+            debug(f"  FileNotFoundError: {e}")
             if "sshpass" in str(e):
                 print_status(f"sshpass not found. Install it with: brew install hudochenkov/sshpass/sshpass", "error")
             else:
                 print_status(f"Failed to start {name}: {e}", "error")
             return None
         except Exception as e:
+            debug(f"  Exception starting SSH process: {e}")
             print_status(f"Failed to start {name}: {e}", "error")
             return None
     
@@ -784,6 +814,83 @@ def check_and_install_dependencies():
         sys.exit(1)
 
 
+def sync_files_to_pis():
+    """Sync necessary files from Mac to Pis before starting agents."""
+    print(f"\n{Colors.BOLD}━━━ Syncing Files to Pis ━━━{Colors.ENDC}\n")
+    
+    debug("Starting file sync to Pis")
+    debug(f"Mac script directory: {SCRIPT_DIR}")
+    
+    files_to_sync = [
+        ("pi1_agent.py", PI1_SSH_HOST, "~/FinalVersion/Team6/ConnectingPi/"),
+        ("config.py", PI1_SSH_HOST, "~/FinalVersion/Team6/ConnectingPi/"),
+        ("spotify_controller.py", PI1_SSH_HOST, "~/FinalVersion/Team6/ConnectingPi/"),
+        ("pi2_agent.py", PI2_SSH_HOST, "~/FinalVersion/Team6/ConnectingPi/"),
+        ("config.py", PI2_SSH_HOST, "~/FinalVersion/Team6/ConnectingPi/"),
+        ("spotify_controller.py", PI2_SSH_HOST, "~/FinalVersion/Team6/ConnectingPi/"),
+    ]
+    
+    debug(f"Files to sync: {len(files_to_sync)} files")
+    
+    all_synced = True
+    
+    for filename, host, remote_path in files_to_sync:
+        local_file = SCRIPT_DIR / filename
+        
+        debug(f"Syncing {filename} to {host}:{remote_path}")
+        debug(f"  Local file: {local_file}")
+        debug(f"  Exists: {local_file.exists()}")
+        
+        if not local_file.exists():
+            print_status(f"{filename} not found locally — skipping", "warning")
+            debug(f"  File not found, skipping")
+            continue
+        
+        # Use scp to copy file
+        if PI1_PASSWORD and host == PI1_SSH_HOST:
+            cmd = ["sshpass", "-p", PI1_PASSWORD, "scp", str(local_file), f"{PI_SSH_USER}@{host}:{remote_path}"]
+            debug(f"  Using Pi1 password authentication")
+        elif PI2_PASSWORD and host == PI2_SSH_HOST:
+            cmd = ["sshpass", "-p", PI2_PASSWORD, "scp", str(local_file), f"{PI_SSH_USER}@{host}:{remote_path}"]
+            debug(f"  Using Pi2 password authentication")
+        else:
+            cmd = ["scp", str(local_file), f"{PI_SSH_USER}@{host}:{remote_path}"]
+            debug(f"  Using SSH key authentication")
+        
+        # Obscure password in debug output
+        debug_cmd = [c if c != PI1_PASSWORD and c != PI2_PASSWORD else "***" for c in cmd]
+        debug(f"  Command: {' '.join(debug_cmd)}")
+        
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            debug(f"  Return code: {result.returncode}")
+            if result.returncode == 0:
+                debug(f"  ✓ Successfully synced {filename} to {host}")
+            else:
+                debug(f"  ✗ Failed to sync {filename}")
+                debug(f"  stdout: {result.stdout}")
+                debug(f"  stderr: {result.stderr}")
+                print_status(f"Failed to sync {filename} to {host}", "error")
+                all_synced = False
+        except subprocess.TimeoutExpired:
+            debug(f"  ✗ Timeout syncing {filename} to {host}")
+            print_status(f"Timeout syncing {filename} to {host}", "error")
+            all_synced = False
+        except Exception as e:
+            debug(f"  ✗ Exception: {e}")
+            print_status(f"Error syncing {filename} to {host}: {e}", "error")
+            all_synced = False
+    
+    if all_synced:
+        print_status("All files synced to Pis", "success")
+        debug("File sync completed successfully")
+    else:
+        print_status("Some files failed to sync — Pis may have outdated code", "warning")
+        debug("File sync completed with errors")
+    
+    print()
+
+
 def main():
     parser = argparse.ArgumentParser(description="AirWave Launcher")
     parser.add_argument('--setup', action='store_true', help='Run onboarding setup only')
@@ -791,7 +898,23 @@ def main():
     parser.add_argument('--pi1', action='store_true', help='Run pi1_agent only')
     parser.add_argument('--pi2', action='store_true', help='Run pi2_agent only')
     parser.add_argument('--local', action='store_true', help='Run agents locally (no SSH)')
+    parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     args = parser.parse_args()
+    
+    # Enable debug mode if --debug flag is set
+    if args.debug:
+        global DEBUG
+        DEBUG = True
+        debug("Debug mode enabled via --debug flag")
+    
+    if DEBUG:
+        debug("=== AirWave Launcher Starting ===")
+        debug(f"Python version: {sys.version}")
+        debug(f"Script directory: {SCRIPT_DIR}")
+        debug(f"Arguments: {vars(args)}")
+        debug(f"Environment variables:")
+        for key in ['AIRWAVE_DEBUG', 'MQTT_BROKER', 'HOME', 'USER']:
+            debug(f"  {key} = {os.environ.get(key, 'not set')}")
     
     print_banner()
     
@@ -812,14 +935,22 @@ def main():
     
     # First run - need full setup
     if is_first_run():
+        debug("First run detected - no config file found")
         print(f"  {Colors.YELLOW}First time setup detected!{Colors.ENDC}")
         config = run_onboarding()
+        debug("Onboarding completed", config)
     else:
+        debug("Existing installation detected")
         mqtt_broker, config = prompt_mqtt_broker()
+        debug(f"MQTT broker prompt result: {mqtt_broker}")
         # If user typed 'setup', config will be from run_onboarding()
         if mqtt_broker is None:
+            debug("User requested full setup")
             # Full setup was run, mqtt_broker already set in config
             mqtt_broker = config.get('mqtt_broker', 'localhost')
+            debug(f"Using MQTT broker from config: {mqtt_broker}")
+    
+    debug("Current configuration:", config)
     
     # Ensure dashboard config exists
     if not DASHBOARD_CONFIG.exists():
@@ -835,6 +966,10 @@ def main():
     
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
+    
+    # Sync files to Pis before starting (only if running Pi agents)
+    if run_pi1 or run_pi2:
+        sync_files_to_pis()
     
     print(f"\n{Colors.BOLD}━━━ Starting Services ━━━{Colors.ENDC}\n")
     
