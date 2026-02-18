@@ -1061,7 +1061,10 @@
             if (payload.auto_volume_enabled !== undefined) {
                 document.getElementById('autoVolumeEnabled').checked = payload.auto_volume_enabled;
                 document.getElementById('autoVolumeStatus').textContent = 
-                    payload.manual_override ? 'Override' : (payload.auto_volume_enabled ? 'On' : 'Off');
+                    payload.manual_override ? '🔒 Manual' : (payload.auto_volume_enabled ? '📏 Distance' : 'Off');
+                
+                // Update toggle to reflect actual state
+                document.getElementById('autoVolumeEnabled').checked = payload.auto_volume_enabled;
             }
 
             if (payload.tracking_enabled !== undefined) {
@@ -1113,6 +1116,10 @@
             currentVolume = parseInt(value);
             document.getElementById('volumeValue').textContent = currentVolume;
             document.getElementById('volumeBar').style.width = currentVolume + '%';
+            
+            // Disable auto volume when manual slider is used
+            document.getElementById('autoVolumeEnabled').checked = false;
+            
             sendToPi2({ command: 'set_volume', level: currentVolume });
         }
 
@@ -1121,6 +1128,10 @@
             document.getElementById('volumeValue').textContent = currentVolume;
             document.getElementById('volumeBar').style.width = currentVolume + '%';
             document.getElementById('volumeSlider').value = currentVolume;
+            
+            // Disable auto volume when manual buttons are used
+            document.getElementById('autoVolumeEnabled').checked = false;
+            
             sendToPi2({ command: 'set_volume', level: currentVolume });
         }
 

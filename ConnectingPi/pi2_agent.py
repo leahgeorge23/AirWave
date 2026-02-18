@@ -190,15 +190,18 @@ def on_mqtt_message(client, userdata, msg):
             
             if command == "set_volume":
                 level = payload.get("level", 50)
-                print(f"[VOLUME] Setting volume to {level}%")
+                print(f"[VOLUME] Manual volume override: {level}%")
                 manual_volume_override = level
+                auto_volume_enabled = False  # Disable auto volume when manual is used
                 set_volume(level)
+                publish_status()  # Update dashboard immediately
             elif command == "tracking_enable":
                 tracking_enabled = payload.get("enabled", True)
             elif command == "auto_volume_enable":
                 auto_volume_enabled = payload.get("enabled", True)
                 if auto_volume_enabled:
-                    manual_volume_override = None
+                    manual_volume_override = None  # Clear manual override when auto is re-enabled
+                publish_status()  # Update dashboard immediately
             elif command == "pan":
                 angle = payload.get("angle", 0)
                 current_pan = max(-90, min(90, angle))
