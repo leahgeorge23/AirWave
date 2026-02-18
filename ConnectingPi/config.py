@@ -22,7 +22,7 @@ import os
 #   Change "YOUR-COMPUTER-NAME.local" to your computer's hostname
 #   Examples: "Drews-MacBook-Pro.local", "raspberrypi.local", "192.168.1.100"
 
-MQTT_BROKER_DEFAULT = "Leahs-MacBook-Pro.local"  # <-- CHANGE THIS
+MQTT_BROKER_DEFAULT = "YOUR-COMPUTER-NAME.local"  # <-- CHANGE THIS
 MQTT_BROKER = os.environ.get("MQTT_BROKER", MQTT_BROKER_DEFAULT)
 MQTT_PORT = 1883
 MQTT_KEEPALIVE = 60
@@ -131,10 +131,3 @@ SPOTIFY_REFRESH_TOKEN = os.environ.get("SPOTIFY_REFRESH_TOKEN", "")
 #    export SPOTIFY_CLIENT_SECRET="your_client_secret"
 #    export SPOTIFY_REFRESH_TOKEN="your_refresh_token"
 # ============================================================================
-
-# ============================================================
-# SPOTIFY API CREDENTIALS (added by launcher)
-# ============================================================
-SPOTIFY_CLIENT_ID     = "ca36b53326bb4d309a48603af9f0be8d"
-SPOTIFY_CLIENT_SECRET = "dd70d34f38e84e5fbea1345cfd636389"
-SPOTIFY_REFRESH_TOKEN = "AQDqA2qZST6fDN-_D4So36WG1Xbj8nqUz7ps8hR4uDBS-uV86_QUOD0rGkznwJWudVWtCB4R-GDiXJhUsPR2dbSRYHJfgpZP1OAWaaMyHITZUlw2-TIGOxKdaOJygmCtydA"

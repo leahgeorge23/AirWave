@@ -51,7 +51,7 @@ PI_SSH_USER = "pi"
 PI1_PASSWORD = "raspberry"  # <-- CHANGE THIS to your Pi 1 password
 PI2_PASSWORD = "raspberry"  # <-- CHANGE THIS to your Pi 2 password
 
-# Default paths on the Pis (assumes user clones to ~/FinalVersion/Team6/ConnectingPi)
+# Default paths on the Pis (pre-configured for product handoff)
 PI1_SCRIPT_PATH = "~/FinalVersion/Team6/ConnectingPi/pi1_agent.py"
 PI2_SCRIPT_PATH = "~/FinalVersion/Team6/ConnectingPi/pi2_agent.py"
 
