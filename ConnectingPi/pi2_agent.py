@@ -70,7 +70,7 @@ current_mood = "neutral"
 
 VOL_NEAR = 70
 VOL_MID = 80
-VOL_FAR = 100
+VOL_FAR = 93
 REF_DISTANCE_FEET = 5.0
 BOUND_NEAR_MID = 4.0
 BOUND_MID_FAR = 6.0
