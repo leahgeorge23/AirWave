@@ -656,67 +656,7 @@ class GestureEngine:
         return None
 
 
-# ============================================================================
-# BLE CONNECTION HELPERS - Auto-cleanup and reconnection
-# ============================================================================
-
-async def cleanup_stale_ble_connections(mac_address):
-    """Force disconnect stale BLE connections."""
-    print(f"[BLE] Cleaning up stale connections to {mac_address}...")
-    try:
-        disconnect_cmd = f'bluetoothctl disconnect {mac_address}'
-        process = await asyncio.create_subprocess_shell(
-            disconnect_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        await asyncio.wait_for(process.communicate(), timeout=3)
-        await asyncio.sleep(0.5)
-        print(f"[BLE] Disconnected via bluetoothctl")
-    except asyncio.TimeoutError:
-        pass  # Timeout is fine
-    except Exception as e:
-        print(f"[BLE] Cleanup: {e}")
-    await asyncio.sleep(1)
-
-
-async def connect_imu_with_retry(mac_address, max_retries=3):
-    """Connect to IMU with automatic cleanup and retry."""
-    from bleak import BleakClient
-    
-    # Cleanup first
-    await cleanup_stale_ble_connections(mac_address)
-    
-    for attempt in range(max_retries):
-        try:
-            print(f"[IMU] Connection attempt {attempt + 1}/{max_retries}...")
-            client = BleakClient(mac_address, timeout=10.0)
-            await client.connect()
-            
-            if client.is_connected:
-                print(f"[IMU] ✓ Connected on attempt {attempt + 1}")
-                return client
-            else:
-                await client.disconnect()
-                
-        except Exception as e:
-            print(f"[IMU] Attempt {attempt + 1} failed: {e}")
-            
-            if attempt == 0:
-                await cleanup_stale_ble_connections(mac_address)
-            
-            if attempt < max_retries - 1:
-                wait_time = 2 ** attempt
-                print(f"[IMU] Retrying in {wait_time}s...")
-                await asyncio.sleep(wait_time)
-    
-    print(f"[IMU] ✗ Failed after {max_retries} attempts")
-    return None
-
-
-# ============================================================================
-# BLE runner
-# ============================================================================
+# ---------------- BLE runner ----------------
 async def imu_run(client: "BleakClient", notify_uuid: str, label: str):
     """
     Reads WT901 packets from notify UUID, decodes accel/gyro,
@@ -799,15 +739,10 @@ async def run_gesture_detection():
         return
 
     print(f"[IMU] Connecting to {IMU_MAC}...")
-    client = await connect_imu_with_retry(IMU_MAC, max_retries=3)
-    
-    if client is None:
-        print("[IMU] Could not connect. Check if IMU is powered on.")
-        imu_connected = False
-        publish_status("online")
-        return
-    
+    client = None
     try:
+        client = BleakClient(IMU_MAC)
+        await client.connect()
         print("[IMU] Connected.")
         imu_connected = True
         publish_status("online")
@@ -827,14 +762,9 @@ async def run_gesture_detection():
         publish_status("online")
         if client is not None:
             try:
-                print("[IMU] Disconnecting gracefully...")
-                if client.is_connected:
-                    await client.disconnect()
-                    await asyncio.sleep(0.5)
-                print("[IMU] ✓ Disconnected")
-            except Exception as e:
-                print(f"[IMU] Disconnect error: {e}")
-
+                await client.disconnect()
+            except Exception:
+                pass
 
 
 # ============================================================================
@@ -1126,27 +1056,21 @@ def run_voice_detection(loop: asyncio.AbstractEventLoop):
                     if partial_text and os.environ.get("VOICE_PRINT_PARTIALS", "1") == "1":
                         print(f"[VOICE] Partial: {partial_text}")
 
-                    # Agent-level partial debounce: accept stable partials to reduce "finicky" feel
-                    if not hasattr(run_voice_detection, "_last_partial"):
-                        run_voice_detection._last_partial = ""
-                        run_voice_detection._last_partial_t = 0.0
-
+                    # Agent-level partial processing: trigger IMMEDIATELY on first valid command
                     if not hasattr(run_voice_detection, "_last_cmd"):
                         run_voice_detection._last_cmd = None
                         run_voice_detection._last_cmd_t = 0.0
 
+                    # NEW APPROACH: Extract first valid command from partial immediately
                     if not final_text and partial_text:
-                        now = time.time()
-                        if partial_text == run_voice_detection._last_partial:
-                            stable = float(os.environ.get("VOICE_PARTIAL_STABLE", "0.40"))
-                            if (now - run_voice_detection._last_partial_t) >= stable:
-                                if any(k in partial_text for k in ["play", "pause", "stop", "next", "skip", "previous", "back", "volume", "louder", "quieter", "softer", "turn", "increase", "decrease"]):
-                                    final_text = partial_text
-                                    final_from_partial = True
-                                    run_voice_detection._last_partial = ""
-                        else:
-                            run_voice_detection._last_partial = partial_text
-                            run_voice_detection._last_partial_t = now
+                        # Check if partial contains any command word
+                        cmd_from_partial = map_voice_command_strict(partial_text)
+                        if cmd_from_partial:
+                            # We found a valid command in the partial!
+                            # Use it immediately without waiting for stability
+                            final_text = partial_text
+                            final_from_partial = True
+                            print(f"[VOICE] Triggering on partial: {partial_text}")
 
                     if not final_text:
                         print("[VOICE] Ready for next command")
@@ -1159,9 +1083,8 @@ def run_voice_detection(loop: asyncio.AbstractEventLoop):
 
                     print(f"[VOICE] Heard (offline): {text}")
 
-                    # When we consume a stable partial as a command, reset Vosk state
-                    # so old words do not accumulate into the next partial.
-                    if final_from_partial and hasattr(vc, "_rec") and vc._rec is not None:
+                    # CRITICAL: Reset Vosk after EVERY final to prevent stacking
+                    if hasattr(vc, "_rec") and vc._rec is not None:
                         try:
                             vc._rec.Reset()
                         except Exception:
@@ -1170,7 +1093,7 @@ def run_voice_detection(loop: asyncio.AbstractEventLoop):
                     cmd = map_voice_command_strict(text)
                     if cmd:
                         now = time.time()
-                        cooldown = float(os.environ.get("VOICE_CMD_COOLDOWN", "0.75"))
+                        cooldown = float(os.environ.get("VOICE_CMD_COOLDOWN", "0.50"))
                         if run_voice_detection._last_cmd == cmd and (now - run_voice_detection._last_cmd_t) < cooldown:
                             print("[VOICE] Duplicate suppressed")
                             print("[VOICE] Ready for next command")
@@ -1181,6 +1104,13 @@ def run_voice_detection(loop: asyncio.AbstractEventLoop):
 
                         print(f"[VOICE] Recognized command: {cmd}")
                         loop.call_soon_threadsafe(voice_cmd_queue.put_nowait, cmd)
+                        
+                        # CRITICAL: Reset Vosk AGAIN immediately after publishing command
+                        if hasattr(vc, "_rec") and vc._rec is not None:
+                            try:
+                                vc._rec.Reset()
+                            except Exception:
+                                pass
 
                     print("[VOICE] Ready for next command")
 
