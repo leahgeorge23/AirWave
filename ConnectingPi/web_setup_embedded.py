@@ -149,9 +149,14 @@ SETUP_HTML = """<!DOCTYPE html>
                     Spotify Configuration (Required)
                 </div>
                 <div class="help-text">
-                    1. Go to: developer.spotify.com/dashboard<br>
-                    2. Create app with redirect URI: http://127.0.0.1:8888/callback<br>
-                    3. Copy your Client ID and Client Secret below<br>
+                    1. Go to: <strong>developer.spotify.com/dashboard</strong><br>
+                    2. Click "Log In" (top right)<br>
+                    &nbsp;&nbsp;&nbsp;<strong style="color: #ff6b35;">⚠️ LOGIN with the Spotify account you'll use to play music</strong><br>
+                    3. Click your profile → Dashboard → "Create App"<br>
+                    4. App Settings:<br>
+                    &nbsp;&nbsp;&nbsp;• App Name: AirWave (or anything)<br>
+                    &nbsp;&nbsp;&nbsp;• Redirect URI: <strong>http://127.0.0.1:8888/callback</strong><br>
+                    5. Copy your Client ID and Client Secret below<br>
                     <br>
                     <strong>Note:</strong> Spotify Premium is required for AirWave to work.
                 </div>

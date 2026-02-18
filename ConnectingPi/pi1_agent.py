@@ -94,6 +94,9 @@ voice_enabled = True
 voice_cmd_queue = None
 gesture_cmd_queue = None
 
+# Trigger for forcing IMU reconnection
+force_imu_reconnect = False
+
 # ============================================================================
 # LED FEEDBACK MODULE (best-effort; won't crash if not sudo)
 # ============================================================================
@@ -219,8 +222,15 @@ def on_mqtt_message(client, userdata, msg):
             print(f"[LED] Enabled: {led_enabled}")
 
         elif command == "gesture_enable":
+            global force_imu_reconnect
+            was_enabled = gesture_enabled
             gesture_enabled = payload.get("enabled", True)
             print(f"[IMU] Enabled: {gesture_enabled}")
+            
+            # If re-enabling after being disabled, force reconnect
+            if not was_enabled and gesture_enabled:
+                force_imu_reconnect = True
+                print("[IMU] Will reconnect IMU on next loop")
 
         elif command == "voice_enable":
             voice_enabled = payload.get("enabled", True)
@@ -256,9 +266,9 @@ def publish_gesture(gesture_type, source="gesture"):
 
     # LED feedback
     if source == "gesture":
-        led_flash((0, 255, 0), 0.5)  # green - 1 second flash
+        led_flash((0, 255, 0), 0.12)  # green
     else:
-        led_flash((0, 0, 255), 0.5)  # blue - 1 second flash
+        led_flash((0, 0, 255), 0.12)  # blue
 
 
 def _execute_direct_spotify_command(command):
@@ -1172,6 +1182,18 @@ async def main():
 
     try:
         while True:
+            global force_imu_reconnect
+            
+            # If gestures are disabled, just sleep and check again
+            if not gesture_enabled and not force_imu_reconnect:
+                await asyncio.sleep(1.0)
+                continue
+            
+            # Clear reconnect flag and run detection
+            if force_imu_reconnect:
+                print("[IMU] Reconnecting due to toggle...")
+                force_imu_reconnect = False
+            
             await run_gesture_detection()
             print("[IMU] gesture task ended; retrying in 2s...")
             await asyncio.sleep(2.0)

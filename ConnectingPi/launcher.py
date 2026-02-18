@@ -223,11 +223,13 @@ def setup_spotify():
     
     print(f"\n{Colors.YELLOW}Step 1: Create Spotify Developer App{Colors.ENDC}")
     print("  1. Go to: https://developer.spotify.com/dashboard")
-    print("  2. Log in with your Spotify Premium account")
-    print("  3. Click 'Create App'")
-    print("  4. App name: 'AirWave' (or anything)")
-    print("  5. Redirect URI: http://127.0.0.1:8888/callback")
-    print("  6. Copy your Client ID and Client Secret\n")
+    print("  2. Click 'Log In' (top right)")
+    print(f"     {Colors.RED}⚠️  LOGIN with the Spotify account you'll use to play music{Colors.ENDC}")
+    print("  3. Click your profile → Dashboard → 'Create App'")
+    print("  4. App Settings:")
+    print("     • App Name: AirWave (or anything)")
+    print("     • Redirect URI: http://127.0.0.1:8888/callback")
+    print("  5. Copy your Client ID and Client Secret\n")
     
     input(f"  Press {Colors.CYAN}Enter{Colors.ENDC} when you have your credentials ready...")
     
