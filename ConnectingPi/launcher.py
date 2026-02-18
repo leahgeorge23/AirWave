@@ -909,6 +909,64 @@ def sync_files_to_pis():
     print()
 
 
+
+
+def configure_mosquitto():
+    """Ensure mosquitto.conf has the required configuration for AirWave."""
+    # Detect config path
+    if Path("/opt/homebrew/etc/mosquitto/mosquitto.conf").exists():
+        config_path = Path("/opt/homebrew/etc/mosquitto/mosquitto.conf")
+    elif Path("/usr/local/etc/mosquitto/mosquitto.conf").exists():
+        config_path = Path("/usr/local/etc/mosquitto/mosquitto.conf")
+    else:
+        return False, "Config file not found"
+    
+    # Required configuration
+    required_config = """listener 1883
+protocol mqtt
+allow_anonymous true
+
+listener 9001
+protocol websockets
+allow_anonymous true
+"""
+    
+    try:
+        # Read existing config
+        existing_config = config_path.read_text()
+        
+        # Check if required settings are present
+        has_1883 = "listener 1883" in existing_config
+        has_9001 = "listener 9001" in existing_config
+        has_websockets = "protocol websockets" in existing_config
+        has_anonymous = "allow_anonymous true" in existing_config
+        
+        if has_1883 and has_9001 and has_websockets and has_anonymous:
+            return True, "Already configured"
+        
+        # Need to update config
+        print_status("Mosquitto config needs updating for WebSocket support", "warning")
+        print(f"  Current config at: {config_path}")
+        
+        # Backup existing config
+        backup_path = config_path.with_suffix('.conf.backup')
+        if not backup_path.exists():
+            config_path.write_text(existing_config)  # Write to backup
+            import shutil
+            shutil.copy(config_path, backup_path)
+            print_status(f"Backed up existing config to {backup_path}", "info")
+        
+        # Write new config
+        config_path.write_text(required_config)
+        print_status("Updated mosquitto.conf with WebSocket support", "success")
+        return True, "Updated"
+        
+    except PermissionError:
+        return False, "Permission denied - run: sudo chmod 644 " + str(config_path)
+    except Exception as e:
+        return False, str(e)
+
+
 def main():
     parser = argparse.ArgumentParser(description="AirWave Launcher")
     parser.add_argument('--setup', action='store_true', help='Run onboarding setup only')
@@ -993,7 +1051,15 @@ def main():
     
     mqtt_broker = config.get('mqtt_broker', 'localhost')
     
-    # Start Mosquitto MQTT broker first
+    # Configure and start Mosquitto MQTT broker first
+    print_status("Configuring Mosquitto MQTT broker...", "info")
+    
+    # Check/update mosquitto config
+    config_ok, config_msg = configure_mosquitto()
+    if not config_ok:
+        print_status(f"Could not configure mosquitto: {config_msg}", "warning")
+        print_status("Dashboard may not connect properly", "warning")
+    
     print_status("Starting Mosquitto MQTT broker...", "info")
     try:
         # Check if mosquitto is already running
@@ -1005,12 +1071,29 @@ def main():
         if check_running.returncode == 0:
             print_status("Mosquitto already running", "success")
         else:
+            # Detect correct mosquitto config path for Apple Silicon vs Intel
+            if Path("/opt/homebrew/etc/mosquitto/mosquitto.conf").exists():
+                config_path = "/opt/homebrew/etc/mosquitto/mosquitto.conf"  # Apple Silicon
+            elif Path("/usr/local/etc/mosquitto/mosquitto.conf").exists():
+                config_path = "/usr/local/etc/mosquitto/mosquitto.conf"  # Intel Mac
+            else:
+                # Fallback: try to start without config file
+                config_path = None
+            
             # Start mosquitto
-            mosquitto_process = subprocess.Popen(
-                ["mosquitto", "-c", "/opt/homebrew/etc/mosquitto/mosquitto.conf"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
+            if config_path:
+                mosquitto_process = subprocess.Popen(
+                    ["mosquitto", "-c", config_path],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            else:
+                # Start with default config
+                mosquitto_process = subprocess.Popen(
+                    ["mosquitto"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
             time.sleep(1)  # Give it a moment to start
             
             # Verify it started
