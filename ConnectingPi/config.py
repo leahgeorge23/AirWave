@@ -55,21 +55,30 @@ BLUETOOTH_SPEAKER_NAME = "A2DP"  # Usually "A2DP" for most speakers
 # On other systems, you may need to update these paths
 # Common alternative: cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 
-import cv2
-_cascade_dir = "/usr/share/opencv/haarcascades/"
-
-# Try to use cv2.data.haarcascades if available (works on most systems)
 try:
-    if hasattr(cv2, 'data') and cv2.data.haarcascades:
-        _cascade_dir = cv2.data.haarcascades
-except:
-    pass
-
-FACE_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_frontalface_default.xml")
-PROFILE_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_profileface.xml")
-UPPER_BODY_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_upperbody.xml")
-EYE_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_eye.xml")
-SMILE_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_smile.xml")
+    import cv2
+    _cascade_dir = "/usr/share/opencv/haarcascades/"
+    
+    # Try to use cv2.data.haarcascades if available (works on most systems)
+    try:
+        if hasattr(cv2, 'data') and cv2.data.haarcascades:
+            _cascade_dir = cv2.data.haarcascades
+    except:
+        pass
+    
+    FACE_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_frontalface_default.xml")
+    PROFILE_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_profileface.xml")
+    UPPER_BODY_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_upperbody.xml")
+    EYE_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_eye.xml")
+    SMILE_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_smile.xml")
+except ImportError:
+    # OpenCV not installed - set default paths (Pi 2 only needs these)
+    _cascade_dir = "/usr/share/opencv/haarcascades/"
+    FACE_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_frontalface_default.xml")
+    PROFILE_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_profileface.xml")
+    UPPER_BODY_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_upperbody.xml")
+    EYE_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_eye.xml")
+    SMILE_CASCADE_PATH = os.path.join(_cascade_dir, "haarcascade_smile.xml")
 
 # ============================================================================
 # SPOTIFY API CREDENTIALS
@@ -122,10 +131,3 @@ SPOTIFY_REFRESH_TOKEN = os.environ.get("SPOTIFY_REFRESH_TOKEN", "")
 #    export SPOTIFY_CLIENT_SECRET="your_client_secret"
 #    export SPOTIFY_REFRESH_TOKEN="your_refresh_token"
 # ============================================================================
-
-# ============================================================
-# SPOTIFY API CREDENTIALS (added by launcher)
-# ============================================================
-SPOTIFY_CLIENT_ID     = "ca36b53326bb4d309a48603af9f0be8d"
-SPOTIFY_CLIENT_SECRET = "dd70d34f38e84e5fbea1345cfd636389"
-SPOTIFY_REFRESH_TOKEN = "AQA3fvvGDHACM0Z8EdCHx_sdN-3YJlYLl37WCVFzeR9oBHlPPktuYaLYxuJoOIZ0h64bB4gRlsbG0k20byfi4otkECegxZpjyOtkPo-Ls79YN7B4ydcHzsKBXS4r54BIEHY"
