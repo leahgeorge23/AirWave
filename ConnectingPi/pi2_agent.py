@@ -749,6 +749,25 @@ def main():
     # Warm up Spotify token/session once at startup.
     spotify.warmup()
     
+    # Make Pi 2 discoverable for Bluetooth pairing
+    print("[BLUETOOTH] Enabling discoverable mode for device pairing...")
+    try:
+        subprocess.run(
+            ["sudo", "bluetoothctl", "discoverable", "on"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5
+        )
+        subprocess.run(
+            ["sudo", "bluetoothctl", "pairable", "on"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5
+        )
+        print("[BLUETOOTH] Pi 2 is now discoverable for new device pairing")
+    except Exception as e:
+        print(f"[BLUETOOTH] Could not enable discoverable mode: {e}")
+    
     # Release camera from any other processes first
     print("[CAMERA] Releasing camera from other processes...")
     release_camera()
