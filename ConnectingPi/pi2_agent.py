@@ -407,10 +407,12 @@ def set_volume(percent):
     
     # Apply exponential curve for better perceived volume scaling
     # This makes 50% on slider = ~71% actual volume (comfortable listening)
-    # Formula: actual = (slider/100)^2 * 100
-    # Result: 0→0%, 25→6%, 50→25%, 75→56%, 100→100%
-    actual_percent = (percent / 100.0) ** 1.5 * 100
+    # Formula: actual = (slider/100)^1.2 * 100
+    # Result: 0→0%, 25→18%, 50→61%, 75→82%, 100→100%
+    actual_percent = (percent / 100.0) ** 1.2 * 100
     actual_percent = int(max(0, min(100, actual_percent)))
+    
+    print(f"[VOLUME] Slider: {percent}% → Actual: {actual_percent}%")
     
     try:
         # Get all available BlueALSA controls dynamically
