@@ -476,6 +476,14 @@ def run_web_setup_flow():
         else:
             print(f"\n{Colors.GREEN}━━━ Setup Complete! ━━━{Colors.ENDC}\n")
             print_status("Configuration saved", "success")
+            
+            # Important: Bluetooth pairing instructions
+            print(f"\n{Colors.BOLD}📱 IMPORTANT: Pair Your Phone with Pi 2{Colors.ENDC}")
+            print(f"  {Colors.CYAN}1.{Colors.ENDC} Open Bluetooth settings on your phone")
+            print(f"  {Colors.CYAN}2.{Colors.ENDC} Look for {Colors.YELLOW}\"PiSpeaker\"{Colors.ENDC}")
+            print(f"  {Colors.CYAN}3.{Colors.ENDC} Tap to connect")
+            print(f"  {Colors.GREEN}→{Colors.ENDC} This is where your music will play!")
+            print()
         
         return config
         
@@ -538,6 +546,14 @@ def run_terminal_setup():
         print_status("Configuration saved", "success")
         print_status(f"Pi1 script: {PI1_SCRIPT_PATH}", "info")
         print_status(f"Pi2 script: {PI2_SCRIPT_PATH}", "info")
+        
+        # Important: Bluetooth pairing instructions
+        print(f"\n{Colors.BOLD}📱 IMPORTANT: Pair Your Phone with Pi 2{Colors.ENDC}")
+        print(f"  {Colors.CYAN}1.{Colors.ENDC} Open Bluetooth settings on your phone")
+        print(f"  {Colors.CYAN}2.{Colors.ENDC} Look for {Colors.YELLOW}\"PiSpeaker\"{Colors.ENDC}")
+        print(f"  {Colors.CYAN}3.{Colors.ENDC} Tap to connect")
+        print(f"  {Colors.GREEN}→{Colors.ENDC} This is where your music will play!")
+        print()
     
     return config
 

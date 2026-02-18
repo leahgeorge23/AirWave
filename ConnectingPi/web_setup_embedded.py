@@ -150,7 +150,6 @@ SETUP_HTML = """<!DOCTYPE html>
                 </div>
                 <div class="help-text">
                     1. Go to: developer.spotify.com/dashboard<br>
-                    * NOTE: it should be the same account that you will play music from!*<br><br>
                     2. Create app with redirect URI: http://127.0.0.1:8888/callback<br>
                     3. Copy your Client ID and Client Secret below<br>
                     <br>
@@ -164,6 +163,20 @@ SETUP_HTML = """<!DOCTYPE html>
                        placeholder="Your Spotify Client Secret" required>
                 <div class="error" id="spotifyError">
                     Please fill in both Spotify credentials
+                </div>
+            </div>
+            
+            <div class="step">
+                <div class="step-title">
+                    <span class="step-number">3</span>
+                    Connect Your Phone to Pi 2
+                </div>
+                <div class="help-text">
+                    📱 <strong>IMPORTANT:</strong> After clicking "Start AirWave" below, pair your phone:<br><br>
+                    1. Open Bluetooth settings on your phone<br>
+                    2. Look for <strong>"PiSpeaker"</strong><br>
+                    3. Tap to connect<br>
+                    4. This is where your music will play!
                 </div>
             </div>
             
