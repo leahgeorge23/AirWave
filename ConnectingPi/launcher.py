@@ -754,6 +754,7 @@ def check_and_install_dependencies():
         ("requests",   "requests"),
         ("paho.mqtt",  "paho-mqtt"),
         ("urllib3",    "urllib3"),
+        ("pyaudio",    "pyaudio"),
     ]
     
     for import_name, pip_name in python_packages:
@@ -762,6 +763,21 @@ def check_and_install_dependencies():
             print_status(f"{pip_name}", "success")
         except ImportError:
             print_status(f"{pip_name} not found — installing...", "warning")
+            # pyaudio requires portaudio to be installed first via brew
+            if pip_name == "pyaudio":
+                portaudio_ok = subprocess.run(
+                    ["brew", "list", "portaudio"], capture_output=True
+                ).returncode == 0
+                if not portaudio_ok:
+                    print_status("Installing portaudio (required for pyaudio)...", "info")
+                    brew_result = subprocess.run(
+                        ["brew", "install", "portaudio"],
+                        capture_output=True, text=True
+                    )
+                    if brew_result.returncode != 0:
+                        print_status("Failed to install portaudio. Run: brew install portaudio", "error")
+                        all_good = False
+                        continue
             result = subprocess.run(
                 [sys.executable, "-m", "pip", "install", pip_name],
                 capture_output=True, text=True
