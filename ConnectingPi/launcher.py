@@ -972,10 +972,18 @@ allow_anonymous true
             shutil.copy(config_path, backup_path)
             print_status(f"Backed up existing config to {backup_path}", "info")
         
-        # Write new config
-        config_path.write_text(required_config)
-        print_status("Updated mosquitto.conf with WebSocket support", "success")
-        return True, "Updated"
+        # Write new config using sudo
+        result = subprocess.run(
+            ["sudo", "tee", str(config_path)],
+            input=required_config,
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            print_status("Updated mosquitto.conf with WebSocket support", "success")
+            return True, "Updated"
+        else:
+            return False, "Failed to write config - try running with sudo"
         
     except PermissionError:
         return False, "Permission denied - run: sudo chmod 644 " + str(config_path)
