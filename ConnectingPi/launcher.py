@@ -754,7 +754,6 @@ def check_and_install_dependencies():
         ("requests",   "requests"),
         ("paho.mqtt",  "paho-mqtt"),
         ("urllib3",    "urllib3"),
-        ("pyaudio",    "pyaudio"),
     ]
     
     for import_name, pip_name in python_packages:
@@ -763,21 +762,6 @@ def check_and_install_dependencies():
             print_status(f"{pip_name}", "success")
         except ImportError:
             print_status(f"{pip_name} not found — installing...", "warning")
-            # pyaudio requires portaudio to be installed first via brew
-            if pip_name == "pyaudio":
-                portaudio_ok = subprocess.run(
-                    ["brew", "list", "portaudio"], capture_output=True
-                ).returncode == 0
-                if not portaudio_ok:
-                    print_status("Installing portaudio (required for pyaudio)...", "info")
-                    brew_result = subprocess.run(
-                        ["brew", "install", "portaudio"],
-                        capture_output=True, text=True
-                    )
-                    if brew_result.returncode != 0:
-                        print_status("Failed to install portaudio. Run: brew install portaudio", "error")
-                        all_good = False
-                        continue
             result = subprocess.run(
                 [sys.executable, "-m", "pip", "install", pip_name],
                 capture_output=True, text=True
@@ -930,12 +914,29 @@ def sync_files_to_pis():
 def configure_mosquitto():
     """Ensure mosquitto.conf has the required configuration for AirWave."""
     # Detect config path
-    if Path("/opt/homebrew/etc/mosquitto/mosquitto.conf").exists():
-        config_path = Path("/opt/homebrew/etc/mosquitto/mosquitto.conf")
-    elif Path("/usr/local/etc/mosquitto/mosquitto.conf").exists():
-        config_path = Path("/usr/local/etc/mosquitto/mosquitto.conf")
+    apple_silicon_path = Path("/opt/homebrew/etc/mosquitto/mosquitto.conf")
+    intel_path = Path("/usr/local/etc/mosquitto/mosquitto.conf")
+    
+    # Determine which path to use
+    if apple_silicon_path.exists():
+        config_path = apple_silicon_path
+    elif intel_path.exists():
+        config_path = intel_path
+    elif Path("/opt/homebrew/etc/mosquitto").exists():
+        # Directory exists but no config - create it (Apple Silicon)
+        config_path = apple_silicon_path
+    elif Path("/usr/local/etc/mosquitto").exists():
+        # Directory exists but no config - create it (Intel)
+        config_path = intel_path
     else:
-        return False, "Config file not found"
+        # Try to create directory for Apple Silicon (most common)
+        try:
+            Path("/opt/homebrew/etc/mosquitto").mkdir(parents=True, exist_ok=True)
+            config_path = apple_silicon_path
+        except PermissionError:
+            return False, "Cannot create mosquitto config directory - run: sudo mkdir -p /opt/homebrew/etc/mosquitto"
+        except Exception:
+            return False, "Config directory not found and cannot be created"
     
     # Required configuration
     required_config = """listener 1883
@@ -948,6 +949,14 @@ allow_anonymous true
 """
     
     try:
+        # Check if config exists
+        if not config_path.exists():
+            # Create new config
+            print_status(f"Creating mosquitto config at {config_path}", "info")
+            config_path.write_text(required_config)
+            print_status("Created mosquitto.conf with WebSocket support", "success")
+            return True, "Created"
+        
         # Read existing config
         existing_config = config_path.read_text()
         
@@ -967,23 +976,14 @@ allow_anonymous true
         # Backup existing config
         backup_path = config_path.with_suffix('.conf.backup')
         if not backup_path.exists():
-            config_path.write_text(existing_config)  # Write to backup
             import shutil
             shutil.copy(config_path, backup_path)
             print_status(f"Backed up existing config to {backup_path}", "info")
         
-        # Write new config using sudo
-        result = subprocess.run(
-            ["sudo", "tee", str(config_path)],
-            input=required_config,
-            capture_output=True,
-            text=True
-        )
-        if result.returncode == 0:
-            print_status("Updated mosquitto.conf with WebSocket support", "success")
-            return True, "Updated"
-        else:
-            return False, "Failed to write config - try running with sudo"
+        # Write new config
+        config_path.write_text(required_config)
+        print_status("Updated mosquitto.conf with WebSocket support", "success")
+        return True, "Updated"
         
     except PermissionError:
         return False, "Permission denied - run: sudo chmod 644 " + str(config_path)
