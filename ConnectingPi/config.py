@@ -22,7 +22,7 @@ import os
 #   Change "YOUR-COMPUTER-NAME.local" to your computer's hostname
 #   Examples: "Drews-MacBook-Pro.local", "raspberrypi.local", "192.168.1.100"
 
-MQTT_BROKER_DEFAULT = "YOUR-COMPUTER-NAME.local"  # <-- CHANGE THIS
+MQTT_BROKER_DEFAULT = "Leahs-MacBook-Pro.local"  # <-- CHANGE THIS
 MQTT_BROKER = os.environ.get("MQTT_BROKER", MQTT_BROKER_DEFAULT)
 MQTT_PORT = 1883
 MQTT_KEEPALIVE = 60

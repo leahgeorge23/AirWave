@@ -27,17 +27,18 @@ SETUP_HTML = """<!DOCTYPE html>
             align-items: center;
             justify-content: center;
             padding: 20px;
+            font-size: 20px;
         }
         .container {
             background: white;
             border-radius: 20px;
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            max-width: 600px;
+            max-width: 1600px;
             width: 100%;
             padding: 40px;
         }
-        h1 { text-align: center; color: #333; margin-bottom: 10px; font-size: 2.5rem; }
-        .subtitle { text-align: center; color: #666; margin-bottom: 30px; font-size: 1.1rem; }
+        h1 { text-align: center; color: #333; margin-bottom: 10px; font-size: 3.5rem; }
+        .subtitle { text-align: center; color: #666; margin-bottom: 30px; font-size: 1.5rem; }
         .step {
             margin-bottom: 30px;
             padding: 20px;
@@ -57,12 +58,12 @@ SETUP_HTML = """<!DOCTYPE html>
             font-weight: bold;
             margin-right: 10px;
         }
-        .step-title { font-size: 1.2rem; font-weight: 600; color: #333; margin-bottom: 15px; }
+        .step-title { font-size: 1.5rem; font-weight: 600; color: #333; margin-bottom: 15px; }
         .help-text {
             background: #e3f2fd;
             padding: 12px;
             border-radius: 8px;
-            font-size: 0.9rem;
+            font-size: 1.3rem;
             margin-bottom: 15px;
             color: #1976d2;
             font-family: 'Courier New', monospace;
@@ -73,7 +74,7 @@ SETUP_HTML = """<!DOCTYPE html>
             padding: 12px 15px;
             border: 2px solid #ddd;
             border-radius: 8px;
-            font-size: 1rem;
+            font-size: 1.3rem;
             transition: border-color 0.3s;
         }
         input[type="text"]:focus, input[type="password"]:focus {
@@ -126,7 +127,7 @@ SETUP_HTML = """<!DOCTYPE html>
 <body>
     <div class="container">
         <h1>🌊 AirWave</h1>
-        <p class="subtitle">Welcome! Let's get you set up in 2 minutes.</p>
+        <p class="subtitle">Welcome! Let's get you set up.</p>
         
         <form id="setupForm">
             <div class="step">
@@ -135,7 +136,7 @@ SETUP_HTML = """<!DOCTYPE html>
                     MQTT Broker Configuration
                 </div>
                 <div class="help-text">
-                    On your Mac, run: echo "$(scutil --get LocalHostName).local"
+                    On your Mac, run: <br> echo "$(scutil --get LocalHostName).local"
                 </div>
                 <label for="mqttBroker">MQTT Broker Address:</label>
                 <input type="text" id="mqttBroker" name="mqttBroker" 
@@ -177,7 +178,7 @@ SETUP_HTML = """<!DOCTYPE html>
                     Connect Your Phone to Pi 2
                 </div>
                 <div class="help-text">
-                    📱 <strong>IMPORTANT:</strong> After clicking "Start AirWave" below, pair your phone:<br><br>
+                    📱 <strong>IMPORTANT:</strong> BEFORE clicking "Start AirWave" below, pair your phone:<br><br>
                     1. Open Bluetooth settings on your phone<br>
                     2. Look for <strong>"PiSpeaker"</strong><br>
                     3. Tap to connect<br>

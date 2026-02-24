@@ -411,7 +411,7 @@ def run_onboarding():
     
     # Offer web-based or terminal-based setup
     print("  Choose your setup method:")
-    print(f"  {Colors.CYAN}1. Web Interface{Colors.ENDC} (recommended)")
+    print(f"  {Colors.CYAN}1. Web Interface{Colors.ENDC} (recommended) {Colors.GREEN} - FOR FIRST TIME USERS!{Colors.ENDC}")
     print(f"  {Colors.CYAN}2. Terminal{Colors.ENDC} (for advanced users)\n")
     
     choice = input("  Enter choice (1 or 2) [1]: ").strip()
@@ -711,7 +711,7 @@ def prompt_mqtt_broker():
     if current_broker:
         print(f"  Current MQTT Broker: {Colors.CYAN}{current_broker}{Colors.ENDC}")
         print(f"\n  Press Enter to continue, or type:")
-        print(f"  • {Colors.CYAN}'setup'{Colors.ENDC} for complete re-setup")
+        print(f"  • {Colors.CYAN}'setup'{Colors.ENDC} for complete re-setup {Colors.GREEN}' - FOR FIRST TIME USERS!'{Colors.ENDC}")
         print(f"  • {Colors.CYAN}new hostname{Colors.ENDC} to change MQTT broker\n")
         
         response = input(f"  [{Colors.GREEN}Enter to continue{Colors.ENDC}]: ").strip()
