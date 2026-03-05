@@ -949,16 +949,7 @@
                     }
                 }
                 
-                // Update toggle states
-                if (payload.gesture_enabled !== undefined) {
-                    document.getElementById('gestureEnabled').checked = payload.gesture_enabled;
-                }
-                if (payload.voice_enabled !== undefined) {
-                    document.getElementById('voiceEnabled').checked = payload.voice_enabled;
-                }
-                if (payload.led_enabled !== undefined) {
-                    document.getElementById('ledEnabled').checked = payload.led_enabled;
-                }
+                // Toggle states are controlled by the user only — do not overwrite from status updates
             }
         }
 
@@ -1102,18 +1093,34 @@
             sendToPi1({ command: 'led_off' });
         }
 
+        // Track when user last toggled each switch so status updates don't overwrite
+        const toggleCooldowns = {};
+        const TOGGLE_COOLDOWN_MS = 3000;
+
+        function setToggleCooldown(id) {
+            toggleCooldowns[id] = Date.now();
+        }
+
+        function isToggleOnCooldown(id) {
+            const last = toggleCooldowns[id];
+            return last && (Date.now() - last) < TOGGLE_COOLDOWN_MS;
+        }
+
         function toggleGesture() {
             const enabled = document.getElementById('gestureEnabled').checked;
+            setToggleCooldown('gestureEnabled');
             sendToPi1({ command: 'gesture_enable', enabled: enabled });
         }
 
         function toggleVoice() {
             const enabled = document.getElementById('voiceEnabled').checked;
+            setToggleCooldown('voiceEnabled');
             sendToPi1({ command: 'voice_enable', enabled: enabled });
         }
 
         function toggleLed() {
             const enabled = document.getElementById('ledEnabled').checked;
+            setToggleCooldown('ledEnabled');
             sendToPi1({ command: 'led_enable', enabled: enabled });
         }
 
