@@ -235,6 +235,18 @@ def on_mqtt_message(client, userdata, msg):
         elif command == "voice_enable":
             voice_enabled = payload.get("enabled", True)
             print(f"[VOICE] Enabled: {voice_enabled}")
+            
+            # Clear any buffered voice commands when disabling
+            if not voice_enabled and voice_cmd_queue is not None:
+                cleared_count = 0
+                while not voice_cmd_queue.empty():
+                    try:
+                        voice_cmd_queue.get_nowait()
+                        cleared_count += 1
+                    except:
+                        break
+                if cleared_count > 0:
+                    print(f"[VOICE] Cleared {cleared_count} queued commands")
 
         elif command == "status":
             publish_status("online")
@@ -1042,9 +1054,34 @@ def run_voice_detection(loop: asyncio.AbstractEventLoop):
                     return
             print("[VOICE] Voice detection active; listening for commands")
 
+            # Track if we were disabled so we can flush stale audio on re-enable
+            was_disabled = False
+
             while True:
                 if not voice_enabled:
+                    was_disabled = True
                     time.sleep(0.1)
+                    continue
+
+                # If just re-enabled, flush any stale audio in the buffer
+                if was_disabled:
+                    was_disabled = False
+                    print("[VOICE] Re-enabled, flushing stale audio...")
+                    
+                    # Reset Vosk recognizer state to clear any partial results
+                    if hasattr(vc, "_rec") and vc._rec is not None:
+                        try:
+                            vc._rec.Reset()
+                        except:
+                            pass
+                    
+                    # Consume any stale audio in the mic buffer (quick non-blocking read)
+                    try:
+                        r.listen(source, timeout=0.1, phrase_time_limit=0.1)
+                    except:
+                        pass
+                    
+                    print("[VOICE] Ready for fresh commands")
                     continue
 
                 try:
