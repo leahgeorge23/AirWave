@@ -848,11 +848,30 @@ def run_voice_and_fft(loop: asyncio.AbstractEventLoop):
             return 0.0
         return float(np.mean(mags[idx]))
 
+    mic_was_stopped = False
+
     try:
         while True:
             if not voice_enabled:
+                if not mic_was_stopped:
+                    try:
+                        stream.stop_stream()
+                    except Exception:
+                        pass
+                    mic_was_stopped = True
+                    speech_active = False
+                    speech_frames = []
+                    print("[VOICE+FFT] Mic stream stopped (voice disabled)")
                 time.sleep(0.1)
                 continue
+
+            if mic_was_stopped:
+                try:
+                    stream.start_stream()
+                except Exception:
+                    pass
+                mic_was_stopped = False
+                print("[VOICE+FFT] Mic stream resumed (voice enabled)")
 
             data = stream.read(CHUNK, exception_on_overflow=False)
             samples = np.frombuffer(data, dtype=np.int16).astype(np.float32)
@@ -1054,19 +1073,33 @@ def run_voice_detection(loop: asyncio.AbstractEventLoop):
                     return
             print("[VOICE] Voice detection active; listening for commands")
 
-            # Track if we were disabled so we can flush stale audio on re-enable
+            # Track if we were disabled so we can stop the mic
             was_disabled = False
+            pa_stream = source.stream
 
             while True:
                 if not voice_enabled:
-                    was_disabled = True
+                    if not was_disabled:
+                        was_disabled = True
+                        # Stop the underlying PyAudio stream so mic takes no input
+                        try:
+                            if pa_stream and pa_stream.is_active():
+                                pa_stream.stop_stream()
+                                print("[VOICE] Mic stream stopped (voice disabled)")
+                        except Exception:
+                            pass
                     time.sleep(0.1)
                     continue
 
-                # If just re-enabled, flush any stale audio in the buffer
+                # If just re-enabled, restart the stream and flush stale audio
                 if was_disabled:
                     was_disabled = False
-                    print("[VOICE] Re-enabled, flushing stale audio...")
+                    try:
+                        if pa_stream and not pa_stream.is_active():
+                            pa_stream.start_stream()
+                            print("[VOICE] Mic stream resumed (voice enabled)")
+                    except Exception:
+                        pass
                     
                     # Reset Vosk recognizer state to clear any partial results
                     if hasattr(vc, "_rec") and vc._rec is not None:
