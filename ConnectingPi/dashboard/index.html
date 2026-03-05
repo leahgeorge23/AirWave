@@ -1,4 +1,4 @@
-\<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -723,6 +723,7 @@
         const MOOD_CHECK_INTERVAL = 15;
         let moodCountdown = MOOD_CHECK_INTERVAL;
         let moodCountdownTimer = null;
+
         function startMoodCountdown() {
             if (moodCountdownTimer) {
                 clearInterval(moodCountdownTimer);
@@ -741,7 +742,6 @@
                 el.textContent = `${moodCountdown}s`;
             }
         }
-
 
         function connect() {
             console.log('Connecting to MQTT broker:', MQTT_BROKER);
@@ -1076,15 +1076,21 @@
         // SEND COMMANDS
         // ============================================================
         function sendToPi1(payload) {
-            if (client && client.connected) {
-                client.publish(TOPIC_PI1_COMMANDS, JSON.stringify(payload));
+            if (!client || !client.connected) {
+                console.warn('MQTT not connected, cannot send to Pi1');
+                return false;
             }
+            client.publish(TOPIC_PI1_COMMANDS, JSON.stringify(payload), { qos: 1 });
+            return true;
         }
 
         function sendToPi2(payload) {
-            if (client && client.connected) {
-                client.publish(TOPIC_PI2_COMMANDS, JSON.stringify(payload));
+            if (!client || !client.connected) {
+                console.warn('MQTT not connected, cannot send to Pi2');
+                return false;
             }
+            client.publish(TOPIC_PI2_COMMANDS, JSON.stringify(payload), { qos: 1 });
+            return true;
         }
 
         // Pi 1 Controls
@@ -1173,8 +1179,12 @@
         }
 
         function recalibrateDistance() {
-            sendToPi2({ command: 'recalibrate' });
-            addLog('system', 'Sent recalibration request to Pi 2');
+            if (sendToPi2({ command: 'recalibrate' })) {
+                addLog('system', 'Sent recalibration request to Pi 2');
+            } else {
+                addLog('system', '⚠️ FAILED - MQTT disconnected');
+                alert('Cannot recalibrate: Not connected to MQTT broker');
+            }
         }
 
         // ============================================================
