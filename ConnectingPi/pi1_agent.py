@@ -408,7 +408,7 @@ def publish_gesture(gesture_type, source="gesture"):
     if source == "gesture":
         led_flash((0, 255, 0), 0.12)  # green
     else:
-        led_flash((0, 0, 255), 0.12)  # blue
+        led_flash((0, 255, 0), 0.12)  # blue
 
 
 def _execute_direct_spotify_command(command):
