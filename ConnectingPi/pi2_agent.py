@@ -148,7 +148,7 @@ def on_mqtt_connect(client, userdata, flags, rc):
         print(f"[MQTT] Connection failed with code {rc}")
 
 def on_mqtt_message(client, userdata, msg):
-    global tracking_enabled, auto_volume_enabled, manual_volume_override, current_pan, current_tilt
+    global tracking_enabled, auto_volume_enabled, manual_volume_override, current_pan, current_tilt, recalibrate_requested
     try:
         payload = json.loads(msg.payload.decode())
         
