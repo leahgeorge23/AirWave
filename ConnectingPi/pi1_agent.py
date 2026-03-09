@@ -37,6 +37,12 @@ import subprocess
 import struct
 import math
 
+#setup for light dancing
+if "PULSE_SERVER" not in os.environ:
+    os.environ["PULSE_RUNTIME_PATH"] = "/run/user/1000/pulse"
+    os.environ["PULSE_SERVER"] = "unix:/run/user/1000/pulse/native"
+
+
 # Voice mapping (offline Vosk module)
 import voice_commands_offline as vc
 try:
@@ -137,6 +143,50 @@ def _safe_pixels_fill(color):
         # Usually: /dev/mem permission error if not run with sudo
         pass
 
+def reset_bluetooth_device(mac: str):
+    print(f"[IMU] Resetting Bluetooth state for {mac}...")
+    
+    try:
+        proc = subprocess.Popen(
+            ["bluetoothctl"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        full_input = "power on\ndisconnect {mac}\nremove {mac}\nquit\n"
+        proc.communicate(input=full_input, timeout=10)
+        print("[IMU] bluetoothctl reset done")
+    except Exception as e:
+        print(f"[IMU] bluetoothctl reset failed: {e}")
+    
+    # Restart bluetooth service
+    try:
+        subprocess.run(
+            ["sudo", "systemctl", "restart", "bluetooth"],
+            capture_output=True, text=True, timeout=10
+        )
+        print("[IMU] Bluetooth service restarted")
+    except Exception as e:
+        print(f"[IMU] Bluetooth restart error: {e}")
+    
+    time.sleep(2)  # Wait for service to come back
+    
+    # Power the adapter back on AFTER restart
+    try:
+        proc = subprocess.Popen(
+            ["bluetoothctl"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        proc.communicate(input="power on\nquit\n", timeout=10)
+        print("[IMU] Bluetooth adapter powered on")
+    except Exception as e:
+        print(f"[IMU] Failed to power on adapter: {e}")
+    
+    time.sleep(2)  # Give adapter time to fully initialize
 
 def led_flash(color=(0, 255, 0), duration=0.8):
     """Flash LEDs with specified color."""
@@ -880,7 +930,6 @@ async def imu_run(client: "BleakClient", notify_uuid: str, label: str):
 
 
 async def run_gesture_detection():
-    """Connects to IMU and runs primary notify UUID, then fallback on error."""
     global imu_connected
     if not BLEAK_AVAILABLE:
         print("[IMU] Bleak not installed; gesture detection disabled")
@@ -907,6 +956,20 @@ async def run_gesture_detection():
 
     except Exception as e:
         print(f"[IMU] Connection error: {e}")
+        
+        # Detect stale connection errors and auto-reset
+        error_str = str(e).lower()
+        if any(keyword in error_str for keyword in [
+            "software caused connection abort",
+            "connection abort",
+            "org.bluez.error",
+            "not connected",
+            "device removed",
+            "no powered bluetooth",
+        ]):
+            print("[IMU] Detected stale connection — auto-resetting Bluetooth...")
+            reset_bluetooth_device(IMU_MAC)
+            
     finally:
         imu_connected = False
         publish_status("online")
