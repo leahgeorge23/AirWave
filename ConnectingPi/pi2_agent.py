@@ -408,47 +408,43 @@ def set_volume(percent):
     percent = max(0, min(100, percent))
     current_volume = int(percent)
     
-    # Apply exponential curve for better perceived volume scaling
-    # This makes 50% on slider = ~71% actual volume (comfortable listening)
-    # Formula: actual = (slider/100)^1.2 * 100
-    # Result: 0→0%, 25→18%, 50→61%, 75→82%, 100→100%
-    actual_percent = (percent / 100.0) ** 1.2 * 100
-    actual_percent = int(max(0, min(100, actual_percent)))
+    # Convert percentage directly to 0-127 range for bluealsa (no curve - 100% = 100%)
+    vol_value = int(percent * 127 / 100)
     
-    print(f"[VOLUME] Slider: {percent}% → Actual: {actual_percent}%")
+    print(f"[VOLUME] Setting: {percent}% (raw: {vol_value}/127)")
     
     try:
-        # Get all available BlueALSA controls dynamically
+        # Use cset which works reliably for bluealsa
+        # First, get all volume controls
         result = subprocess.run(
-            ["amixer", "-D", "bluealsa", "scontrols"],
+            ["amixer", "-D", "bluealsa", "controls"],
             capture_output=True,
             text=True
         )
         
         if result.returncode == 0 and result.stdout:
-            # Parse output like: Simple mixer control 'F8:7D:76:AA:A8:8C - A2DP',0
-            import re
-            controls = re.findall(r"Simple mixer control '([^']+)'", result.stdout)
-            
-            # Set volume on ALL connected Bluetooth devices
-            for control in controls:
-                subprocess.run(
-                    ["amixer", "-D", "bluealsa", "sset", control, f"{actual_percent}%"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
+            # Find all volume controls and set them
+            for line in result.stdout.split('\n'):
+                if 'Volume' in line:
+                    match = re.search(r'numid=(\d+)', line)
+                    if match:
+                        numid = match.group(1)
+                        subprocess.run(
+                            ["amixer", "-D", "bluealsa", "cset", f"numid={numid}", str(vol_value)],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL
+                        )
         else:
-            # Fallback to configured device if scontrols fails
-            device_name = f"{BLUETOOTH_SPEAKER_MAC} - {BLUETOOTH_SPEAKER_NAME}"
+            # Fallback: try numid=2 directly (common for A2DP volume)
             subprocess.run(
-                ["amixer", "-D", "bluealsa", "sset", device_name, f"{actual_percent}%"],
+                ["amixer", "-D", "bluealsa", "cset", "numid=2", str(vol_value)],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
     except Exception as e:
-        print("Volume set error:", e)
+        print(f"[VOLUME] Error: {e}")
 
-    # Keep Spotify app volume aligned with physical output volume.
+    # Keep Spotify app volume aligned
     try:
         threading.Thread(target=spotify.set_volume, args=(int(percent),), daemon=True).start()
     except Exception:
