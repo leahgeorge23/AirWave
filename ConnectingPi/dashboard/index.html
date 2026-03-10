@@ -7,608 +7,108 @@
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <script src="config.js"></script>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: #cfe9ff;
-            min-height: 100vh;
-            color: #fff;
-            padding: 20px;
-        }
-
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .header h1 {
-            font-size: 2.5rem;
-            margin-bottom: 10px;
-            color: #fff;
-            background: #16213e;
-            display: inline-block;
-            padding: 8px 16px;
-            border-radius: 16px;
-        }
-
-        .connection-status {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 16px;
-            background: #16213e;
-            border-radius: 20px;
-            font-size: 0.9rem;
-        }
-
-        .status-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background: #ff4444;
-            animation: pulse 2s infinite;
-        }
-
-        .status-dot.connected {
-            background: #00ff88;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
-        .dashboard {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            grid-template-rows: auto 1fr;
-            gap: 20px;
-            max-width: 1400px;
-            margin: 0 auto;
-            align-items: start;
-            min-height: calc(100vh - 160px);
-        }
-
-        .card.pi2-card {
-            grid-row: span 2;
-        }
-
-        .card.mqtt-card {
-            grid-column: 1;
-            grid-row: 2;
-            overflow-y: auto;
-            max-height: 150%;
-        }
-
-        .card {
-            background: #16213e;
-            border-radius: 16px;
-            padding: 24px;
-            border: 1px solid rgba(255,255,255,0.1);
-            backdrop-filter: blur(10px);
-        }
-
-        .card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            padding-bottom: 15px;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-        }
-
-        .card-title {
-            font-size: 1.3rem;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .card-title .icon {
-            font-size: 1.5rem;
-        }
-
-        .pi-status {
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 0.8rem;
-            font-weight: 500;
-        }
-
-        .pi-status.online {
-            background: rgba(0, 255, 136, 0.2);
-            color: #00ff88;
-        }
-
-        .pi-status.offline {
-            background: rgba(255, 68, 68, 0.2);
-            color: #ff4444;
-        }
-
-        /* Gesture Feed */
-        .gesture-feed {
-            max-height: 300px;
-            overflow-y: auto;
-        }
-
-        .voice-feed {
-            max-height: 220px;
-            overflow-y: auto;
-        }
-
-        .gesture-item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 12px;
-            background: rgba(255,255,255,0.03);
-            border-radius: 8px;
-            margin-bottom: 8px;
-            animation: slideIn 0.3s ease;
-        }
-
-        @keyframes slideIn {
-            from {
-                opacity: 0;
-                transform: translateX(-20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateX(0);
-            }
-        }
-
-        .gesture-icon {
-            font-size: 1.5rem;
-            width: 40px;
-            text-align: center;
-        }
-
-        .gesture-info {
-            flex: 1;
-        }
-
-        .gesture-type {
-            font-weight: 600;
-            color: #00d9ff;
-        }
-
-        .gesture-meta {
-            font-size: 0.8rem;
-            color: rgba(255,255,255,0.5);
-        }
-
-        /* Volume Control */
-        .volume-display {
-            text-align: center;
-            margin-bottom: 20px;
-        }
-
-        .volume-value {
-            font-size: 4rem;
-            font-weight: 700;
-            background: linear-gradient(90deg, #00ff88, #00d9ff);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        .volume-bar {
-            height: 20px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 10px;
-            overflow: hidden;
-            margin-bottom: 20px;
-        }
-
-        .volume-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #00ff88, #00d9ff);
-            border-radius: 10px;
-            transition: width 0.3s ease;
-        }
-
-        .volume-controls {
-            display: flex;
-            gap: 10px;
-            justify-content: center;
-        }
-
-        .volume-slider {
-            width: 100%;
-            margin: 15px 0;
-            -webkit-appearance: none;
-            height: 8px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 4px;
-            outline: none;
-        }
-
-        .volume-slider::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            width: 24px;
-            height: 24px;
-            background: linear-gradient(135deg, #00ff88, #00d9ff);
-            border-radius: 50%;
-            cursor: pointer;
-        }
-
-        /* Tracking Status */
-        .tracking-info {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-
-        .imu-status {
-            grid-template-columns: 1fr;
-        }
-
-        .stat-box {
-            background: rgba(255,255,255,0.03);
-            padding: 15px;
-            border-radius: 12px;
-            text-align: center;
-        }
-
-        .stat-label {
-            font-size: 0.8rem;
-            color: rgba(255,255,255,0.5);
-            margin-bottom: 5px;
-        }
-
-        .stat-value {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: #00d9ff;
-        }
-
-        .stat-value.tracking {
-            color: #00ff88;
-        }
-
-        .stat-value.not-tracking {
-            color: #ff4444;
-        }
-
-        .stat-value.disconnected {
-            color: #ff4444;
-        }
-
-        /* IMU Status Box */
-        .imu-status-box {
-            background: rgba(255,255,255,0.03);
-            padding: 15px 20px;
-            border-radius: 12px;
-            margin-bottom: 20px;
-            min-height: 80px;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            text-align: center;
-            gap: 6px;
-            transition: background 0.3s ease;
-        }
-
-        .imu-status-box.state-connecting {
-            background: rgba(255, 200, 0, 0.08);
-            border: 1px solid rgba(255, 200, 0, 0.2);
-        }
-
-        .imu-status-box.state-disconnected {
-            background: rgba(255, 68, 68, 0.08);
-            border: 1px solid rgba(255, 68, 68, 0.2);
-        }
-
-        .imu-status-box.state-idle {
-            background: rgba(0, 217, 255, 0.08);
-            border: 1px solid rgba(0, 217, 255, 0.2);
-        }
-
-        .imu-status-box.state-command {
-            background: rgba(0, 255, 136, 0.08);
-            border: 1px solid rgba(0, 255, 136, 0.3);
-            animation: commandPulse 1s ease-in-out infinite;
-        }
-
-        @keyframes commandPulse {
-            0%, 100% { border-color: rgba(0, 255, 136, 0.3); }
-            50% { border-color: rgba(0, 255, 136, 0.8); }
-        }
-
-        .imu-main-label {
-            font-size: 1.3rem;
-            font-weight: 700;
-        }
-
-        .imu-main-label.connecting  { color: #ffc800; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif; background: #cfe9ff; min-height: 100vh; color: #fff; padding: 20px; }
+        .header { text-align: center; margin-bottom: 30px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+        .header h1 { font-size: 2.5rem; margin-bottom: 10px; color: #fff; background: #16213e; display: inline-block; padding: 8px 16px; border-radius: 16px; }
+        .connection-status { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; background: #16213e; border-radius: 20px; font-size: 0.9rem; }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #ff4444; animation: pulse 2s infinite; }
+        .status-dot.connected { background: #00ff88; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .dashboard { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: auto 1fr; gap: 20px; max-width: 1400px; margin: 0 auto; align-items: start; min-height: calc(100vh - 160px); }
+        .card.pi2-card { grid-row: span 2; }
+        .card.mqtt-card { grid-column: 1; grid-row: 2; overflow-y: auto; max-height: 150%; }
+        .card { background: #16213e; border-radius: 16px; padding: 24px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .card-title { font-size: 1.3rem; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+        .card-title .icon { font-size: 1.5rem; }
+        .pi-status { padding: 4px 12px; border-radius: 12px; font-size: 0.8rem; font-weight: 500; }
+        .pi-status.online { background: rgba(0,255,136,0.2); color: #00ff88; }
+        .pi-status.offline { background: rgba(255,68,68,0.2); color: #ff4444; }
+        .gesture-feed { max-height: 300px; overflow-y: auto; }
+        .voice-feed { max-height: 220px; overflow-y: auto; }
+        .gesture-item { display: flex; align-items: center; gap: 12px; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; margin-bottom: 8px; animation: slideIn 0.3s ease; }
+        @keyframes slideIn { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: translateX(0); } }
+        .gesture-icon { font-size: 1.5rem; width: 40px; text-align: center; }
+        .gesture-info { flex: 1; }
+        .gesture-type { font-weight: 600; color: #00d9ff; }
+        .gesture-meta { font-size: 0.8rem; color: rgba(255,255,255,0.5); }
+        .volume-display { text-align: center; margin-bottom: 20px; }
+        .volume-value { font-size: 4rem; font-weight: 700; background: linear-gradient(90deg, #00ff88, #00d9ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .volume-bar { height: 20px; background: rgba(255,255,255,0.1); border-radius: 10px; overflow: hidden; margin-bottom: 20px; }
+        .volume-fill { height: 100%; background: linear-gradient(90deg, #00ff88, #00d9ff); border-radius: 10px; transition: width 0.3s ease; }
+        .volume-controls { display: flex; gap: 10px; justify-content: center; }
+        .volume-slider { width: 100%; margin: 15px 0; -webkit-appearance: none; height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; outline: none; }
+        .volume-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px; background: linear-gradient(135deg, #00ff88, #00d9ff); border-radius: 50%; cursor: pointer; }
+        .tracking-info { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 20px; }
+        .stat-box { background: rgba(255,255,255,0.03); padding: 15px; border-radius: 12px; text-align: center; }
+        .stat-label { font-size: 0.8rem; color: rgba(255,255,255,0.5); margin-bottom: 5px; }
+        .stat-value { font-size: 1.5rem; font-weight: 600; color: #00d9ff; }
+        .stat-value.tracking { color: #00ff88; }
+        .stat-value.not-tracking { color: #ff4444; }
+        .imu-status-box { background: rgba(255,255,255,0.03); padding: 15px 20px; border-radius: 12px; margin-bottom: 20px; min-height: 80px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; gap: 6px; transition: background 0.3s ease; }
+        .imu-status-box.state-connecting  { background: rgba(255,200,0,0.08);  border: 1px solid rgba(255,200,0,0.2); }
+        .imu-status-box.state-disconnected{ background: rgba(255,68,68,0.08);  border: 1px solid rgba(255,68,68,0.2); }
+        .imu-status-box.state-idle        { background: rgba(0,217,255,0.08);  border: 1px solid rgba(0,217,255,0.2); }
+        .imu-status-box.state-command     { background: rgba(0,255,136,0.08);  border: 1px solid rgba(0,255,136,0.3); animation: commandPulse 1s ease-in-out infinite; }
+        @keyframes commandPulse { 0%, 100% { border-color: rgba(0,255,136,0.3); } 50% { border-color: rgba(0,255,136,0.8); } }
+        .imu-main-label { font-size: 1.3rem; font-weight: 700; }
+        .imu-main-label.connecting   { color: #ffc800; }
         .imu-main-label.disconnected { color: #ff4444; }
         .imu-main-label.idle         { color: #00d9ff; }
         .imu-main-label.command      { color: #00ff88; }
+        .imu-sub-label { font-size: 0.82rem; color: rgba(255,255,255,0.5); }
+        .countdown-ring-wrapper { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 4px; }
+        .countdown-ring { position: relative; width: 56px; height: 56px; }
+        .countdown-ring svg { transform: rotate(-90deg); }
+        .countdown-ring .ring-bg   { fill: none; stroke: rgba(255,255,255,0.1); stroke-width: 4; }
+        .countdown-ring .ring-fill { fill: none; stroke: #00ff88; stroke-width: 4; stroke-linecap: round; transition: stroke-dashoffset 0.25s linear; }
+        .countdown-number { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 1.1rem; font-weight: 700; color: #00ff88; }
+        .countdown-hint { font-size: 0.78rem; color: rgba(255,255,255,0.5); }
+        .countdown-hint.ready { color: #00ff88; font-weight: 600; }
+        .countdown-ring .ring-fill.warming { stroke: #ffc800; transition: none; }
+        .countdown-number.warming { color: #ffc800; }
+        .warmup-label { font-size: 0.85rem; font-weight: 600; color: #ffc800; letter-spacing: 0.04em; }
+        .btn { padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; transition: transform 0.2s, box-shadow 0.2s; display: inline-flex; align-items: center; gap: 8px; }
+        .btn:hover { transform: translateY(-2px); }
+        .btn-primary   { background: linear-gradient(135deg, #00d9ff, #0099cc); color: #fff; }
+        .btn-success   { background: linear-gradient(135deg, #00ff88, #00cc6a); color: #fff; }
+        .btn-secondary { background: rgba(255,255,255,0.1); color: #fff; }
+        .btn-lg        { padding: 16px 32px; font-size: 1.1rem; }
+        .toggle-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .toggle-label { font-weight: 500; }
+        .toggle { position: relative; width: 50px; height: 26px; }
+        .toggle input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,0.1); border-radius: 26px; transition: 0.3s; }
+        .toggle-slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: 0.3s; }
+        .toggle input:checked + .toggle-slider { background: linear-gradient(135deg, #00ff88, #00cc6a); }
+        .toggle input:checked + .toggle-slider:before { transform: translateX(24px); }
+        .pantilt-control { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+        .pantilt-row { display: flex; gap: 10px; }
+        .pantilt-btn { width: 50px; height: 50px; border: none; border-radius: 12px; background: rgba(255,255,255,0.1); color: #fff; font-size: 1.5rem; cursor: pointer; transition: background 0.2s; }
+        .pantilt-btn:hover { background: rgba(0,217,255,0.3); }
+        .pantilt-btn.center { background: linear-gradient(135deg, #00d9ff, #0099cc); }
+        .log-area { background: rgba(0,0,0,0.3); border-radius: 8px; padding: 15px; font-family: 'Monaco','Menlo',monospace; font-size: 0.85rem; max-height: 200px; overflow-y: auto; }
+        .log-entry { padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .log-time  { color: rgba(255,255,255,0.4); margin-right: 10px; }
+        .log-topic { color: #00d9ff; }
+        @media (max-width: 768px) { .dashboard { grid-template-columns: 1fr; } .header h1 { font-size: 1.8rem; } }
 
-        .imu-sub-label {
-            font-size: 0.82rem;
-            color: rgba(255,255,255,0.5);
-        }
-
-        /* Command Mode countdown ring */
-        .countdown-ring-wrapper {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 4px;
-            margin-top: 4px;
-        }
-
-        .countdown-ring {
-            position: relative;
-            width: 56px;
-            height: 56px;
-        }
-
-        .countdown-ring svg {
-            transform: rotate(-90deg);
-        }
-
-        .countdown-ring .ring-bg {
-            fill: none;
-            stroke: rgba(255,255,255,0.1);
-            stroke-width: 4;
-        }
-
-        .countdown-ring .ring-fill {
-            fill: none;
-            stroke: #00ff88;
-            stroke-width: 4;
-            stroke-linecap: round;
-            transition: stroke-dashoffset 0.25s linear;
-        }
-
-        .countdown-number {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            font-size: 1.1rem;
-            font-weight: 700;
-            color: #00ff88;
-        }
-
-        .countdown-hint {
-            font-size: 0.78rem;
-            color: rgba(255,255,255,0.5);
-        }
-
-        .countdown-hint.ready {
-            color: #00ff88;
-            font-weight: 600;
-        }
-
-        .countdown-ring .ring-fill.warming {
-            stroke: #ffc800;
-            transition: none;
-        }
-
-        .countdown-number.warming {
-            color: #ffc800;
-        }
-
-        .warmup-label {
-            font-size: 0.85rem;
-            font-weight: 600;
-            color: #ffc800;
-            letter-spacing: 0.04em;
-        }
-
-        /* LED Control */
-        .led-controls {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 10px;
-            margin-bottom: 20px;
-        }
-
-        .color-btn {
-            padding: 15px;
-            border: none;
-            border-radius: 12px;
-            cursor: pointer;
-            font-weight: 600;
-            transition: transform 0.2s, box-shadow 0.2s;
-            color: #fff;
-            text-shadow: 0 1px 2px rgba(0,0,0,0.3);
-        }
-
-        .color-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 20px rgba(0,0,0,0.3);
-        }
-
-        .color-btn.red { background: linear-gradient(135deg, #ff4444, #cc0000); }
-        .color-btn.green { background: linear-gradient(135deg, #00ff88, #00cc6a); }
-        .color-btn.blue { background: linear-gradient(135deg, #00d9ff, #0099cc); }
-        .color-btn.yellow { background: linear-gradient(135deg, #ffff00, #cccc00); color: #333; }
-        .color-btn.purple { background: linear-gradient(135deg, #aa00ff, #7700b3); }
-        .color-btn.off { background: linear-gradient(135deg, #444, #222); }
-
-        /* Buttons */
-        .btn {
-            padding: 12px 24px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 600;
-            transition: transform 0.2s, box-shadow 0.2s;
-            display: inline-flex;
+        /* Voice warmup banner */
+        .voice-warmup-banner {
+            display: none;
             align-items: center;
             gap: 8px;
-        }
-
-        .btn:hover {
-            transform: translateY(-2px);
-        }
-
-        .btn-primary {
-            background: linear-gradient(135deg, #00d9ff, #0099cc);
-            color: #fff;
-        }
-
-        .btn-success {
-            background: linear-gradient(135deg, #00ff88, #00cc6a);
-            color: #fff;
-        }
-
-        .btn-danger {
-            background: linear-gradient(135deg, #ff4444, #cc0000);
-            color: #fff;
-        }
-
-        .btn-secondary {
-            background: rgba(255,255,255,0.1);
-            color: #fff;
-        }
-
-        .btn-lg {
-            padding: 16px 32px;
-            font-size: 1.1rem;
-        }
-
-        /* Toggle Switch */
-        .toggle-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-        }
-
-        .toggle-label {
-            font-weight: 500;
-        }
-
-        .toggle {
-            position: relative;
-            width: 50px;
-            height: 26px;
-        }
-
-        .toggle input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
-
-        .toggle-slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(255,255,255,0.1);
-            border-radius: 26px;
-            transition: 0.3s;
-        }
-
-        .toggle-slider:before {
-            position: absolute;
-            content: "";
-            height: 20px;
-            width: 20px;
-            left: 3px;
-            bottom: 3px;
-            background: #fff;
-            border-radius: 50%;
-            transition: 0.3s;
-        }
-
-        .toggle input:checked + .toggle-slider {
-            background: linear-gradient(135deg, #00ff88, #00cc6a);
-        }
-
-        .toggle input:checked + .toggle-slider:before {
-            transform: translateX(24px);
-        }
-
-        /* Pan-Tilt Control */
-        .pantilt-control {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .pantilt-row {
-            display: flex;
-            gap: 10px;
-        }
-
-        .pantilt-btn {
-            width: 50px;
-            height: 50px;
-            border: none;
-            border-radius: 12px;
-            background: rgba(255,255,255,0.1);
-            color: #fff;
-            font-size: 1.5rem;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-
-        .pantilt-btn:hover {
-            background: rgba(0, 217, 255, 0.3);
-        }
-
-        .pantilt-btn.center {
-            background: linear-gradient(135deg, #00d9ff, #0099cc);
-        }
-
-        /* Log Area */
-        .log-area {
-            background: rgba(0,0,0,0.3);
+            margin-top: 6px;
+            padding: 6px 12px;
+            background: rgba(255, 200, 0, 0.12);
+            border: 1px solid rgba(255, 200, 0, 0.3);
             border-radius: 8px;
-            padding: 15px;
-            font-family: 'Monaco', 'Menlo', monospace;
-            font-size: 0.85rem;
-            max-height: 200px;
-            overflow-y: auto;
+            font-size: 0.82rem;
+            color: #ffc800;
+            animation: pulse 1s ease-in-out infinite;
         }
-
-        .log-entry {
-            padding: 4px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-        }
-
-        .log-time {
-            color: rgba(255,255,255,0.4);
-            margin-right: 10px;
-        }
-
-        .log-topic {
-            color: #00d9ff;
-        }
-
-        /* Responsive */
-        @media (max-width: 768px) {
-            .dashboard {
-                grid-template-columns: 1fr;
-            }
-            
-            .header h1 {
-                font-size: 1.8rem;
-            }
-        }
+        .voice-warmup-banner.visible { display: flex; }
     </style>
 </head>
 <body>
@@ -621,52 +121,49 @@
     </div>
 
     <div class="dashboard">
-        <!-- Pi 1: Gesture & LED Control -->
+        <!-- Pi 1 -->
         <div class="card pi1-card">
             <div class="card-header">
-                <div class="card-title">
-                    <span class="icon">🤖</span>
-                    Pi 1 - Gestures & LEDs
-                </div>
+                <div class="card-title"><span class="icon">🤖</span> Pi 1 - Gestures & LEDs</div>
                 <span class="pi-status offline" id="pi1Status">Offline</span>
             </div>
 
-            <h3 style="margin-bottom: 10px;">IMU Status</h3>
-            <!-- IMU status box: state driven -->
+            <h3 style="margin-bottom:10px;">IMU Status</h3>
             <div class="imu-status-box state-disconnected" id="imuStatusBox">
                 <div class="imu-main-label disconnected" id="imuMainLabel">Disconnected</div>
             </div>
 
-            <h3 style="margin-bottom: 15px;">Recent Gestures</h3>
+            <h3 style="margin-bottom:15px;">Recent Gestures</h3>
             <div class="gesture-feed" id="gestureFeed">
-                <div class="gesture-item" style="color: rgba(255,255,255,0.5);">
-                    Waiting for gestures...
-                </div>
+                <div class="gesture-item" style="color:rgba(255,255,255,0.5);">Waiting for gestures...</div>
             </div>
 
-            <h3 style="margin: 20px 0 15px;">Recent Voice Commands</h3>
+            <h3 style="margin:20px 0 15px;">Recent Voice Commands</h3>
             <div class="voice-feed" id="voiceFeed">
-                <div class="gesture-item" style="color: rgba(255,255,255,0.5);">
-                    Waiting for voice commands...
-                </div>
+                <div class="gesture-item" style="color:rgba(255,255,255,0.5);">Waiting for voice commands...</div>
             </div>
 
-            <h3 style="margin: 20px 0 15px;">Settings</h3>
+            <h3 style="margin:20px 0 15px;">Settings</h3>
+            <!-- Gesture Detection: OFF -->
             <div class="toggle-row">
                 <span class="toggle-label">Gesture Detection</span>
                 <label class="toggle">
-                    <input type="checkbox" id="gestureEnabled" checked onchange="toggleGesture()">
+                    <input type="checkbox" id="gestureEnabled" onchange="toggleGesture()">
                     <span class="toggle-slider"></span>
                 </label>
             </div>
+            <!-- Voice Commands: OFF -->
             <div class="toggle-row">
                 <span class="toggle-label">Voice Commands</span>
                 <label class="toggle">
-                    <!-- Voice off by default -->
                     <input type="checkbox" id="voiceEnabled" onchange="toggleVoice()">
                     <span class="toggle-slider"></span>
                 </label>
             </div>
+            <div class="voice-warmup-banner" id="voiceWarmupBanner">
+                ⏳ Warming up — wait before speaking...
+            </div>
+            <!-- LED Feedback: ON -->
             <div class="toggle-row">
                 <span class="toggle-label">LED Feedback</span>
                 <label class="toggle">
@@ -676,28 +173,19 @@
             </div>
         </div>
 
-        <!-- Pi 2: Volume & Tracking -->
+        <!-- Pi 2 -->
         <div class="card pi2-card">
             <div class="card-header">
-                <div class="card-title">
-                    <span class="icon">🔊</span>
-                    Pi 2 - Volume & Tracking
-                </div>
+                <div class="card-title"><span class="icon">🔊</span> Pi 2 - Volume & Tracking</div>
                 <span class="pi-status offline" id="pi2Status">Offline</span>
             </div>
 
             <div class="volume-display">
                 <div class="volume-value" id="volumeValue">--</div>
-                <div style="color: rgba(255,255,255,0.5);">Volume %</div>
+                <div style="color:rgba(255,255,255,0.5);">Volume %</div>
             </div>
-
-            <div class="volume-bar">
-                <div class="volume-fill" id="volumeBar" style="width: 0%"></div>
-            </div>
-
-            <input type="range" class="volume-slider" id="volumeSlider" 
-                   min="0" max="100" value="50" oninput="setVolume(this.value)">
-
+            <div class="volume-bar"><div class="volume-fill" id="volumeBar" style="width:0%"></div></div>
+            <input type="range" class="volume-slider" id="volumeSlider" min="0" max="100" value="50" oninput="setVolume(this.value)">
             <div class="volume-controls">
                 <button class="btn btn-secondary" onclick="adjustVolume(-10)">🔉 -10</button>
                 <button class="btn btn-secondary" onclick="adjustVolume(-5)">-5</button>
@@ -705,76 +193,37 @@
                 <button class="btn btn-secondary" onclick="adjustVolume(10)">🔊 +10</button>
             </div>
 
-            <h3 style="margin: 25px 0 15px;">Tracking Status</h3>
+            <h3 style="margin:25px 0 15px;">Tracking Status</h3>
             <div class="tracking-info">
-                <div class="stat-box">
-                    <div class="stat-label">Status</div>
-                    <div class="stat-value" id="trackingStatus">--</div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-label">Distance</div>
-                    <div class="stat-value" id="distanceValue">-- ft</div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-label">Pan Angle</div>
-                    <div class="stat-value" id="panAngle">--°</div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-label">Tilt Angle</div>
-                    <div class="stat-value" id="tiltAngle">--°</div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-label">Auto Volume</div>
-                    <div class="stat-value" id="autoVolumeStatus">--</div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-label">Mood</div>
-                    <div class="stat-value" id="moodValue">--</div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-label">Next Mood Check</div>
-                    <div class="stat-value" id="moodCountdown">--s</div>
-                </div>
+                <div class="stat-box"><div class="stat-label">Status</div><div class="stat-value" id="trackingStatus">--</div></div>
+                <div class="stat-box"><div class="stat-label">Distance</div><div class="stat-value" id="distanceValue">-- ft</div></div>
+                <div class="stat-box"><div class="stat-label">Pan Angle</div><div class="stat-value" id="panAngle">--°</div></div>
+                <div class="stat-box"><div class="stat-label">Tilt Angle</div><div class="stat-value" id="tiltAngle">--°</div></div>
+                <div class="stat-box"><div class="stat-label">Auto Volume</div><div class="stat-value" id="autoVolumeStatus">--</div></div>
+                <div class="stat-box"><div class="stat-label">Mood</div><div class="stat-value" id="moodValue">--</div></div>
+                <div class="stat-box"><div class="stat-label">Next Mood Check</div><div class="stat-value" id="moodCountdown">--s</div></div>
             </div>
 
-            <!-- Mood & Playlist Section -->
-            <div id="moodSection" style="display: none; margin-top: 20px;">
-                <h3 style="margin-bottom: 15px;">🎵 Mood-Based Playlist</h3>
-                <div style="background: rgba(255,255,255,0.05); border-radius: 12px; padding: 20px;">
-                    <div style="display: flex; align-items: center; gap: 15px;">
-                        <div id="moodEmoji" style="font-size: 3rem;">😐</div>
-                        <div style="flex: 1;">
-                            <div style="font-size: 1.2rem; font-weight: 600; color: #00d9ff; margin-bottom: 5px;" id="moodLabel">Detecting mood...</div>
-                            <div style="color: rgba(255,255,255,0.6); font-size: 0.9rem;" id="playlistName">--</div>
+            <div id="moodSection" style="display:none;margin-top:20px;">
+                <h3 style="margin-bottom:15px;">🎵 Mood-Based Playlist</h3>
+                <div style="background:rgba(255,255,255,0.05);border-radius:12px;padding:20px;">
+                    <div style="display:flex;align-items:center;gap:15px;">
+                        <div id="moodEmoji" style="font-size:3rem;">😐</div>
+                        <div style="flex:1;">
+                            <div style="font-size:1.2rem;font-weight:600;color:#00d9ff;margin-bottom:5px;" id="moodLabel">Detecting mood...</div>
+                            <div style="color:rgba(255,255,255,0.6);font-size:0.9rem;" id="playlistName">--</div>
                         </div>
-                        <a id="playlistLink" href="#" target="_blank" class="btn btn-success" style="text-decoration: none;">
-                            🎧 Open Playlist
-                        </a>
+                        <a id="playlistLink" href="#" target="_blank" class="btn btn-success" style="text-decoration:none;">🎧 Open Playlist</a>
                     </div>
                 </div>
             </div>
 
-            <h3 style="margin: 20px 0 15px;">Pan-Tilt Control</h3>
-            <div class="pantilt-control">
-                <button class="pantilt-btn" onclick="sendPanTilt('up')">↑</button>
-                <div class="pantilt-row">
-                    <button class="pantilt-btn" onclick="sendPanTilt('left')">←</button>
-                    <button class="pantilt-btn center" onclick="sendPanTilt('center')">⌂</button>
-                    <button class="pantilt-btn" onclick="sendPanTilt('right')">→</button>
-                </div>
-                <button class="pantilt-btn" onclick="sendPanTilt('down')">↓</button>
+            <div style="margin-top:20px;text-align:center;">
+                <button class="btn btn-primary btn-lg" onclick="recalibrateDistance()" style="width:100%;">📏 Recalibrate Distance</button>
+                <div style="color:rgba(255,255,255,0.5);font-size:0.8rem;margin-top:8px;">Stand at your preferred reference distance (5 ft) and click to calibrate</div>
             </div>
 
-            <div style="margin-top: 20px; text-align: center;">
-                <button class="btn btn-primary btn-lg" onclick="recalibrateDistance()" style="width: 100%;">
-                    📏 Recalibrate Distance
-                </button>
-                <div style="color: rgba(255,255,255,0.5); font-size: 0.8rem; margin-top: 8px;">
-                    Stand at your preferred reference distance (5 ft) and click to calibrate
-                </div>
-            </div>
-
-            <h3 style="margin: 25px 0 15px;">Settings</h3>
+            <h3 style="margin:25px 0 15px;">Settings</h3>
             <div class="toggle-row">
                 <span class="toggle-label">Face Tracking</span>
                 <label class="toggle">
@@ -782,10 +231,11 @@
                     <span class="toggle-slider"></span>
                 </label>
             </div>
+            <!-- Auto Volume: OFF -->
             <div class="toggle-row">
                 <span class="toggle-label">Auto Volume</span>
                 <label class="toggle">
-                    <input type="checkbox" id="autoVolumeEnabled" checked onchange="toggleAutoVolume()">
+                    <input type="checkbox" id="autoVolumeEnabled" onchange="toggleAutoVolume()">
                     <span class="toggle-slider"></span>
                 </label>
             </div>
@@ -794,44 +244,33 @@
         <!-- MQTT Log -->
         <div class="card mqtt-card">
             <div class="card-header">
-                <div class="card-title">
-                    <span class="icon">📡</span>
-                    MQTT Message Log
-                </div>
+                <div class="card-title"><span class="icon">📡</span> MQTT Message Log</div>
                 <button class="btn btn-secondary" onclick="clearLog()">Clear</button>
             </div>
-            <div class="log-area" id="mqttLog">
-                <div class="log-entry">Waiting for messages...</div>
-            </div>
+            <div class="log-area" id="mqttLog"><div class="log-entry">Waiting for messages...</div></div>
         </div>
     </div>
 
     <script>
-        // MQTT settings loaded from config.js (auto-generated by launcher)
-        const MQTT_HOST = MQTT_CONFIG.host;
+        const MQTT_HOST    = MQTT_CONFIG.host;
         const MQTT_WS_PORT = MQTT_CONFIG.wsPort;
-        const MQTT_BROKER = MQTT_CONFIG.broker;
+        const MQTT_BROKER  = MQTT_CONFIG.broker;
 
-        // Topics
-        const TOPIC_GESTURES    = 'home/gestures';
-        const TOPIC_PI1_STATUS  = 'home/pi1/status';
-        const TOPIC_PI1_COMMANDS= 'home/pi1/commands';
-        const TOPIC_PI2_STATUS  = 'home/pi2/status';
-        const TOPIC_PI2_COMMANDS= 'home/pi2/commands';
-        const TOPIC_MOOD        = 'home/mood';
+        const TOPIC_GESTURES     = 'home/gestures';
+        const TOPIC_PI1_STATUS   = 'home/pi1/status';
+        const TOPIC_PI1_COMMANDS = 'home/pi1/commands';
+        const TOPIC_PI2_STATUS   = 'home/pi2/status';
+        const TOPIC_PI2_COMMANDS = 'home/pi2/commands';
+        const TOPIC_MOOD         = 'home/mood';
 
-        // Matches pi1_agent constants
-        const COMMAND_READY_DELAY_S = 1.0;   // warm-up before gestures are accepted
-        const COMMAND_TIMEOUT_S     = 5.0;   // total command window
+        const COMMAND_READY_DELAY_S = 1.0;
+        const COMMAND_TIMEOUT_S     = 5.0;
 
-        // ============================================================
-        // IMU STATE MACHINE (dashboard side)
-        // ============================================================
-        // States: 'disconnected' | 'connecting' | 'idle' | 'command'
+        // IMU STATE MACHINE
         let imuState = 'disconnected';
-        let commandCountdownTimer  = null;
-        let commandCountdownValue  = 0;
-        const CIRCUMFERENCE = 2 * Math.PI * 24; // r=24 in SVG
+        let commandCountdownTimer = null;
+        let commandCountdownValue = 0;
+        const CIRCUMFERENCE = 2 * Math.PI * 24;
 
         function setImuState(newState) {
             if (imuState === newState) return;
@@ -842,226 +281,124 @@
         function renderImuStatus() {
             const box   = document.getElementById('imuStatusBox');
             const label = document.getElementById('imuMainLabel');
-
-            // Clear any existing countdown timer when leaving command mode
             if (imuState !== 'command' && commandCountdownTimer) {
                 clearInterval(commandCountdownTimer);
                 commandCountdownTimer = null;
             }
-
-            // Reset box classes
-            box.className = 'imu-status-box';
+            box.className   = 'imu-status-box';
             label.className = 'imu-main-label';
-
             switch (imuState) {
-
                 case 'connecting':
-                    box.classList.add('state-connecting');
-                    label.classList.add('connecting');
-                    label.textContent = 'Connecting...';
-                    box.innerHTML = '';
-                    box.appendChild(label);
-                    break;
-
+                    box.classList.add('state-connecting'); label.classList.add('connecting');
+                    label.textContent = 'Connecting...'; box.innerHTML = ''; box.appendChild(label); break;
                 case 'disconnected':
-                    box.classList.add('state-disconnected');
-                    label.classList.add('disconnected');
-                    label.textContent = 'Disconnected';
-                    box.innerHTML = '';
-                    box.appendChild(label);
-                    break;
-
+                    box.classList.add('state-disconnected'); label.classList.add('disconnected');
+                    label.textContent = 'Disconnected'; box.innerHTML = ''; box.appendChild(label); break;
                 case 'idle':
-                    box.classList.add('state-idle');
-                    label.classList.add('idle');
-                    label.textContent = 'Idle Mode';
-                    box.innerHTML = '';
-                    box.appendChild(label);
+                    box.classList.add('state-idle'); label.classList.add('idle');
+                    label.textContent = 'Idle Mode'; box.innerHTML = ''; box.appendChild(label);
                     const idleSub = document.createElement('div');
-                    idleSub.className = 'imu-sub-label';
-                    idleSub.textContent = 'Double flick to enter command mode';
-                    box.appendChild(idleSub);
-                    break;
-
+                    idleSub.className = 'imu-sub-label'; idleSub.textContent = 'Double flick to enter command mode';
+                    box.appendChild(idleSub); break;
                 case 'command':
-                    box.classList.add('state-command');
-                    label.classList.add('command');
-                    label.textContent = 'Command Mode';
-                    box.innerHTML = '';
-                    box.appendChild(label);
-                    startCommandCountdown();
-                    break;
+                    box.classList.add('state-command'); label.classList.add('command');
+                    label.textContent = 'Command Mode'; box.innerHTML = ''; box.appendChild(label);
+                    startCommandCountdown(); break;
             }
         }
 
         function startCommandCountdown() {
             const box = document.getElementById('imuStatusBox');
-            const gestureWindow = COMMAND_TIMEOUT_S - COMMAND_READY_DELAY_S; // 4s
+            const gestureWindow = COMMAND_TIMEOUT_S - COMMAND_READY_DELAY_S;
             commandCountdownValue = gestureWindow;
-
-            // Build countdown ring — starts in "warming up" state (orange)
             const wrapper = document.createElement('div');
             wrapper.className = 'countdown-ring-wrapper';
             wrapper.innerHTML = `
                 <div class="countdown-ring" id="countdownRing">
                     <svg width="56" height="56" viewBox="0 0 56 56">
-                        <circle class="ring-bg"   cx="28" cy="28" r="24"/>
+                        <circle class="ring-bg" cx="28" cy="28" r="24"/>
                         <circle class="ring-fill warming" cx="28" cy="28" r="24"
-                            stroke-dasharray="${CIRCUMFERENCE}"
-                            stroke-dashoffset="0"
-                            id="ringFill"/>
+                            stroke-dasharray="${CIRCUMFERENCE}" stroke-dashoffset="0" id="ringFill"/>
                     </svg>
                     <div class="countdown-number warming" id="countdownNumber">·</div>
                 </div>
                 <div class="warmup-label" id="warmupLabel"> Wait...</div>
-                <div class="countdown-hint" id="countdownHint" style="display:none;">Make your gesture now</div>
-            `;
+                <div class="countdown-hint" id="countdownHint" style="display:none;">Make your gesture now</div>`;
             box.appendChild(wrapper);
-
-            // --- Phase 1: warm-up bar drains over COMMAND_READY_DELAY_S ---
             let warmupValue = COMMAND_READY_DELAY_S;
-            const warmupInterval = 50;
             const warmupTimer = setInterval(() => {
                 if (imuState !== 'command') { clearInterval(warmupTimer); return; }
-                warmupValue -= warmupInterval / 1000;
-                const fillEl = document.getElementById('ringFill');
-                if (fillEl) {
-                    const fraction = warmupValue / COMMAND_READY_DELAY_S;
-                    fillEl.style.strokeDashoffset = CIRCUMFERENCE * (1 - fraction);
-                }
+                warmupValue -= 0.05;
+                const f = document.getElementById('ringFill');
+                if (f) f.style.strokeDashoffset = CIRCUMFERENCE * (1 - warmupValue / COMMAND_READY_DELAY_S);
                 if (warmupValue <= 0) clearInterval(warmupTimer);
-            }, warmupInterval);
-
-            // --- Phase 2: flip to green and start gesture countdown ---
+            }, 50);
             setTimeout(() => {
                 if (imuState !== 'command') return;
-
-                // Flip ring to green
-                const fillEl   = document.getElementById('ringFill');
-                const numEl    = document.getElementById('countdownNumber');
-                const hintEl   = document.getElementById('countdownHint');
-                const warmupEl = document.getElementById('warmupLabel');
-
-                if (fillEl)   { fillEl.classList.remove('warming');   fillEl.style.strokeDashoffset = '0'; }
-                if (numEl)    { numEl.classList.remove('warming');     numEl.textContent = Math.ceil(commandCountdownValue); }
-                if (hintEl)   { hintEl.style.display = 'block'; hintEl.classList.add('ready'); }
-                if (warmupEl) { warmupEl.style.display = 'none'; }
-
-                const intervalMs = 100;
+                const fillEl=document.getElementById('ringFill'), numEl=document.getElementById('countdownNumber'),
+                      hintEl=document.getElementById('countdownHint'), warmupEl=document.getElementById('warmupLabel');
+                if (fillEl)  { fillEl.classList.remove('warming');  fillEl.style.strokeDashoffset='0'; }
+                if (numEl)   { numEl.classList.remove('warming');   numEl.textContent=Math.ceil(commandCountdownValue); }
+                if (hintEl)  { hintEl.style.display='block';        hintEl.classList.add('ready'); }
+                if (warmupEl){ warmupEl.style.display='none'; }
                 commandCountdownTimer = setInterval(() => {
-                    commandCountdownValue -= intervalMs / 1000;
-
+                    commandCountdownValue -= 0.1;
                     if (commandCountdownValue <= 0 || imuState !== 'command') {
-                        clearInterval(commandCountdownTimer);
-                        commandCountdownTimer = null;
-                        if (imuState === 'command') setImuState('idle');
-                        return;
+                        clearInterval(commandCountdownTimer); commandCountdownTimer = null;
+                        if (imuState === 'command') setImuState('idle'); return;
                     }
-
-                    const n = document.getElementById('countdownNumber');
-                    const f = document.getElementById('ringFill');
+                    const n=document.getElementById('countdownNumber'), f=document.getElementById('ringFill');
                     if (n) n.textContent = Math.ceil(commandCountdownValue);
-                    if (f) {
-                        const fraction = commandCountdownValue / gestureWindow;
-                        f.style.strokeDashoffset = CIRCUMFERENCE * (1 - fraction);
-                    }
-                }, intervalMs);
-
+                    if (f) f.style.strokeDashoffset = CIRCUMFERENCE * (1 - commandCountdownValue / gestureWindow);
+                }, 100);
             }, COMMAND_READY_DELAY_S * 1000);
         }
 
-        // ============================================================
-        // MQTT CONNECTION
-        // ============================================================
-        let client = null;
-        let pi1Online = false;
-        let pi2Online = false;
-        let currentVolume = 50;
-        let currentPanAngle = 0;
-        let currentTiltAngle = 0;
-        let gestureHistory = [];
-        let voiceHistory = [];
-        const MAX_GESTURES = 10;
-        const MAX_VOICE = 10;
-        const MOOD_CHECK_INTERVAL = 15;
-        let moodCountdown = MOOD_CHECK_INTERVAL;
-        let moodCountdownTimer = null;
-
-        // Track whether Pi1 is connected but IMU hasn't reported yet
-        let pi1ConnectedAt = null;
-        let imuConnectingTimer = null;
+        // MQTT
+        let client=null, pi1Online=false, pi2Online=false;
+        let currentVolume=50, currentPanAngle=0, currentTiltAngle=0;
+        let gestureHistory=[], voiceHistory=[];
+        const MAX_GESTURES=10, MAX_VOICE=10, MOOD_CHECK_INTERVAL=15;
+        let moodCountdown=MOOD_CHECK_INTERVAL, moodCountdownTimer=null;
 
         function startMoodCountdown() {
             if (moodCountdownTimer) clearInterval(moodCountdownTimer);
-            moodCountdown = MOOD_CHECK_INTERVAL;
-            updateMoodCountdown();
-            moodCountdownTimer = setInterval(() => {
-                moodCountdown = Math.max(0, moodCountdown - 1);
-                updateMoodCountdown();
-            }, 1000);
+            moodCountdown = MOOD_CHECK_INTERVAL; updateMoodCountdown();
+            moodCountdownTimer = setInterval(() => { moodCountdown=Math.max(0,moodCountdown-1); updateMoodCountdown(); }, 1000);
         }
-
-        function updateMoodCountdown() {
-            const el = document.getElementById('moodCountdown');
-            if (el) el.textContent = `${moodCountdown}s`;
-        }
+        function updateMoodCountdown() { const el=document.getElementById('moodCountdown'); if(el) el.textContent=`${moodCountdown}s`; }
 
         function connect() {
-            console.log('Connecting to MQTT broker:', MQTT_BROKER);
-            client = mqtt.connect(MQTT_BROKER, {
-                clientId: 'dashboard_' + Math.random().toString(16).substr(2, 8),
-                clean: true,
-                reconnectPeriod: 3000
-            });
-
+            client = mqtt.connect(MQTT_BROKER, { clientId:'dashboard_'+Math.random().toString(16).substr(2,8), clean:true, reconnectPeriod:3000 });
             client.on('connect', () => {
-                console.log('Connected to MQTT broker');
                 updateConnectionStatus(true);
-                client.subscribe([
-                    TOPIC_GESTURES,
-                    TOPIC_PI1_STATUS,
-                    TOPIC_PI2_STATUS,
-                    TOPIC_MOOD
-                ], (err) => {
-                    if (!err) addLog('system', 'Subscribed to all topics');
-                });
-                sendToPi1({ command: 'status' });
-                sendToPi2({ command: 'status' });
+                client.subscribe([TOPIC_GESTURES,TOPIC_PI1_STATUS,TOPIC_PI2_STATUS,TOPIC_MOOD], err => { if(!err) addLog('system','Subscribed to all topics'); });
+                sendToPi1({command:'status'}); sendToPi2({command:'status'});
                 startMoodCountdown();
+                // Sync all three OFF defaults to the Pis after connection settles
+                setTimeout(() => {
+                    sendToPi1({command:'gesture_enable',    enabled:false});
+                    sendToPi1({command:'voice_enable',      enabled:false});
+                    sendToPi2({command:'auto_volume_enable',enabled:false});
+                }, 2000);
             });
-
             client.on('message', (topic, message) => {
-                try {
-                    const payload = JSON.parse(message.toString());
-                    handleMessage(topic, payload);
-                } catch (e) {
-                    console.error('Failed to parse message:', e);
-                }
+                try { handleMessage(topic, JSON.parse(message.toString())); } catch(e) {}
             });
-
-            client.on('error',     (err) => { console.error('MQTT error:', err); updateConnectionStatus(false); });
-            client.on('close',     ()    => { updateConnectionStatus(false); });
-            client.on('reconnect', ()    => { document.getElementById('mqttStatusText').textContent = 'Reconnecting...'; });
+            client.on('error',     err => { updateConnectionStatus(false); });
+            client.on('close',     ()  => { updateConnectionStatus(false); });
+            client.on('reconnect', ()  => { document.getElementById('mqttStatusText').textContent='Reconnecting...'; });
         }
 
         function updateConnectionStatus(connected) {
-            const dot  = document.getElementById('mqttStatus');
-            const text = document.getElementById('mqttStatusText');
-            if (connected) {
-                dot.classList.add('connected');
-                text.textContent = 'Connected';
-            } else {
-                dot.classList.remove('connected');
-                text.textContent = 'Disconnected';
-            }
+            const dot=document.getElementById('mqttStatus'), text=document.getElementById('mqttStatusText');
+            if (connected) { dot.classList.add('connected'); text.textContent='Connected'; }
+            else           { dot.classList.remove('connected'); text.textContent='Disconnected'; }
         }
 
-        // ============================================================
-        // MESSAGE HANDLING
-        // ============================================================
         function handleMessage(topic, payload) {
             addLog(topic, JSON.stringify(payload));
-            switch (topic) {
+            switch(topic) {
                 case TOPIC_GESTURES:   handleGesture(payload);   break;
                 case TOPIC_PI1_STATUS: handlePi1Status(payload); break;
                 case TOPIC_PI2_STATUS: handlePi2Status(payload); break;
@@ -1070,299 +407,144 @@
         }
 
         function handleGesture(payload) {
-            const gestureIcons = {
-                'SWIPE_UP': '⏸️', 'SWIPE_DOWN': '▶️',
-                'TWIST_RIGHT': '🔄', 'TWIST_LEFT': '🔃',
-                'VOL_UP': '🔊', 'VOL_DOWN': '🔉',
-                'NEXT_TRACK': '⏭️', 'PREV_TRACK': '⏮️',
-                'PLAY': '▶️', 'PAUSE': '⏸️'
-            };
-
-            const displayType = payload.type === 'SWIPE_UP'   ? 'PAUSE'
-                               : payload.type === 'SWIPE_DOWN' ? 'PLAY'
-                               : payload.type;
-
-            const gesture = {
-                type: displayType,
-                source: payload.source,
-                icon: gestureIcons[payload.type] || '👋',
-                time: new Date().toLocaleTimeString()
-            };
-
-            gestureHistory.unshift(gesture);
-            if (gestureHistory.length > MAX_GESTURES) gestureHistory.pop();
-
-            if (payload.source === 'voice') {
-                voiceHistory.unshift(gesture);
-                if (voiceHistory.length > MAX_VOICE) voiceHistory.pop();
-                updateVoiceFeed();
-            }
-
-            // A gesture was received → IMU goes back to idle
-            if (imuState === 'command') setImuState('idle');
-
+            const icons = {'SWIPE_UP':'⏸️','SWIPE_DOWN':'▶️','TWIST_RIGHT':'🔄','TWIST_LEFT':'🔃','VOL_UP':'🔊','VOL_DOWN':'🔉','NEXT_TRACK':'⏭️','PREV_TRACK':'⏮️','PLAY':'▶️','PAUSE':'⏸️'};
+            const displayType = payload.type==='SWIPE_UP'?'PAUSE':payload.type==='SWIPE_DOWN'?'PLAY':payload.type;
+            const g = {type:displayType, source:payload.source, icon:icons[payload.type]||'👋', time:new Date().toLocaleTimeString()};
+            gestureHistory.unshift(g); if(gestureHistory.length>MAX_GESTURES) gestureHistory.pop();
+            if (payload.source==='voice') { voiceHistory.unshift(g); if(voiceHistory.length>MAX_VOICE) voiceHistory.pop(); updateVoiceFeed(); }
+            if (imuState==='command') setImuState('idle');
             updateGestureFeed();
         }
 
         function updateGestureFeed() {
-            const feed = document.getElementById('gestureFeed');
-            if (gestureHistory.length === 0) {
-                feed.innerHTML = '<div class="gesture-item" style="color: rgba(255,255,255,0.5);">Waiting for gestures...</div>';
-                return;
-            }
-            feed.innerHTML = gestureHistory.map(g => `
-                <div class="gesture-item">
-                    <div class="gesture-icon">${g.icon}</div>
-                    <div class="gesture-info">
-                        <div class="gesture-type">${g.type}</div>
-                        <div class="gesture-meta">${g.source} • ${g.time}</div>
-                    </div>
-                </div>
-            `).join('');
+            const feed=document.getElementById('gestureFeed');
+            feed.innerHTML = gestureHistory.length===0
+                ? '<div class="gesture-item" style="color:rgba(255,255,255,0.5);">Waiting for gestures...</div>'
+                : gestureHistory.map(g=>`<div class="gesture-item"><div class="gesture-icon">${g.icon}</div><div class="gesture-info"><div class="gesture-type">${g.type}</div><div class="gesture-meta">${g.source} • ${g.time}</div></div></div>`).join('');
         }
 
         function updateVoiceFeed() {
-            const feed = document.getElementById('voiceFeed');
-            if (!feed) return;
-            if (voiceHistory.length === 0) {
-                feed.innerHTML = '<div class="gesture-item" style="color: rgba(255,255,255,0.5);">Waiting for voice commands...</div>';
-                return;
-            }
-            feed.innerHTML = voiceHistory.map(v => `
-                <div class="gesture-item">
-                    <div class="gesture-icon">${v.icon}</div>
-                    <div class="gesture-info">
-                        <div class="gesture-type">${v.type}</div>
-                        <div class="gesture-meta">voice • ${v.time}</div>
-                    </div>
-                </div>
-            `).join('');
+            const feed=document.getElementById('voiceFeed'); if(!feed) return;
+            feed.innerHTML = voiceHistory.length===0
+                ? '<div class="gesture-item" style="color:rgba(255,255,255,0.5);">Waiting for voice commands...</div>'
+                : voiceHistory.map(v=>`<div class="gesture-item"><div class="gesture-icon">${v.icon}</div><div class="gesture-info"><div class="gesture-type">${v.type}</div><div class="gesture-meta">voice • ${v.time}</div></div></div>`).join('');
         }
 
         function handlePi1Status(payload) {
-            const statusEl = document.getElementById('pi1Status');
+            const el=document.getElementById('pi1Status');
+            if (payload.status==='offline') { el.textContent='Offline'; el.className='pi-status offline'; pi1Online=false; setImuState('disconnected'); return; }
+            el.textContent='Online'; el.className='pi-status online'; pi1Online=true;
 
-            if (payload.status === 'offline') {
-                statusEl.textContent = 'Offline';
-                statusEl.classList.remove('online');
-                statusEl.classList.add('offline');
-                pi1Online = false;
-                setImuState('disconnected');
-                return;
-            }
-
-            // Pi1 is online
-            statusEl.textContent = 'Online';
-            statusEl.classList.remove('offline');
-            statusEl.classList.add('online');
-            pi1Online = true;
-
-            const imuConnected = payload.imu_connected !== undefined ? payload.imu_connected : true;
-            const imuMode      = payload.imu_mode || 'IDLE';
-
-            if (!imuConnected) {
-                // Pi1 is up but IMU BLE is not connected yet → Connecting...
-                setImuState('connecting');
-            } else {
-                // IMU is connected — reflect its mode
-                if (imuMode === 'COMMAND') {
-                    if (imuState !== 'command') setImuState('command');
+            // Show/hide warmup banner
+            const banner = document.getElementById('voiceWarmupBanner');
+            if (banner) {
+                if (payload.voice_warming_up) {
+                    banner.classList.add('visible');
                 } else {
-                    // IDLE or anything else
-                    if (imuState !== 'idle') setImuState('idle');
+                    banner.classList.remove('visible');
                 }
             }
 
-            // Toggle states are controlled by the user only — do not overwrite from status updates
+            const imuConnected = payload.imu_connected!==undefined ? payload.imu_connected : true;
+            const imuMode      = payload.imu_mode||'IDLE';
+            if (!imuConnected) { setImuState('connecting'); }
+            else if (imuMode==='COMMAND') { if(imuState!=='command') setImuState('command'); }
+            else { if(imuState!=='idle') setImuState('idle'); }
         }
 
         function handleMood(payload) {
-            const moodEmojis  = { happy:'😊', sad:'😢', energetic:'⚡', calm:'😌', neutral:'😌' };
-            const moodColors  = { happy:'#FFD700', sad:'#6495ED', energetic:'#FF6B6B', calm:'#98D8C8', neutral:'#98D8C8' };
-            const moodLabels  = { happy:'Happy', sad:'Sad', energetic:'Energetic', calm:'Chill', neutral:'Chill' };
-
-            const mood        = payload.mood || 'neutral';
-            const playlistName= payload.playlist_name || 'Unknown';
-            const playlistUrl = payload.playlist_url  || '#';
-
-            document.getElementById('moodSection').style.display = 'block';
-            const moodLabel = moodLabels[mood] || (mood.charAt(0).toUpperCase() + mood.slice(1));
-            document.getElementById('moodEmoji').textContent      = moodEmojis[mood] || '😐';
-            document.getElementById('moodLabel').textContent      = `${moodLabel} Mood Detected`;
-            document.getElementById('moodLabel').style.color      = moodColors[mood] || '#00d9ff';
-            document.getElementById('moodValue').textContent      = moodLabel;
-            document.getElementById('moodValue').style.color      = moodColors[mood] || '#00d9ff';
-            document.getElementById('playlistName').textContent   = '🎵 ' + playlistName;
-            document.getElementById('playlistLink').href          = playlistUrl;
+            const emojis ={happy:'😊',sad:'😢',energetic:'⚡',calm:'😌',neutral:'😌'};
+            const colors ={happy:'#FFD700',sad:'#6495ED',energetic:'#FF6B6B',calm:'#98D8C8',neutral:'#98D8C8'};
+            const labels ={happy:'Happy',sad:'Sad',energetic:'Energetic',calm:'Chill',neutral:'Chill'};
+            const mood=payload.mood||'neutral', label=labels[mood]||(mood.charAt(0).toUpperCase()+mood.slice(1));
+            document.getElementById('moodSection').style.display='block';
+            document.getElementById('moodEmoji').textContent   = emojis[mood]||'😐';
+            document.getElementById('moodLabel').textContent   = `${label} Mood Detected`;
+            document.getElementById('moodLabel').style.color   = colors[mood]||'#00d9ff';
+            document.getElementById('moodValue').textContent   = label;
+            document.getElementById('moodValue').style.color   = colors[mood]||'#00d9ff';
+            document.getElementById('playlistName').textContent= '🎵 '+(payload.playlist_name||'Unknown');
+            document.getElementById('playlistLink').href       = payload.playlist_url||'#';
             startMoodCountdown();
         }
 
         function handlePi2Status(payload) {
-            const status = document.getElementById('pi2Status');
-
-            if (payload.status === 'offline') {
-                status.textContent = 'Offline';
-                status.classList.remove('online');
-                status.classList.add('offline');
-                pi2Online = false;
-                return;
+            const el=document.getElementById('pi2Status');
+            if (payload.status==='offline') { el.textContent='Offline'; el.className='pi-status offline'; pi2Online=false; return; }
+            el.textContent='Online'; el.className='pi-status online'; pi2Online=true;
+            if (payload.volume!==undefined) { currentVolume=payload.volume; document.getElementById('volumeValue').textContent=Math.round(payload.volume); document.getElementById('volumeBar').style.width=payload.volume+'%'; document.getElementById('volumeSlider').value=payload.volume; }
+            if (payload.is_tracking!==undefined) {
+                const t=document.getElementById('trackingStatus');
+                if (payload.is_tracking) { t.textContent='Tracking'; t.className='stat-value tracking'; }
+                else                     { t.textContent='Searching'; t.className='stat-value not-tracking'; }
             }
-
-            status.textContent = 'Online';
-            status.classList.remove('offline');
-            status.classList.add('online');
-            pi2Online = true;
-
-            if (payload.volume !== undefined) {
-                currentVolume = payload.volume;
-                document.getElementById('volumeValue').textContent  = Math.round(payload.volume);
-                document.getElementById('volumeBar').style.width    = payload.volume + '%';
-                document.getElementById('volumeSlider').value       = payload.volume;
-            }
-
-            if (payload.is_tracking !== undefined) {
-                const el = document.getElementById('trackingStatus');
-                if (payload.is_tracking) {
-                    el.textContent = 'Tracking';
-                    el.classList.add('tracking');
-                    el.classList.remove('not-tracking');
-                } else {
-                    el.textContent = 'Searching';
-                    el.classList.add('not-tracking');
-                    el.classList.remove('tracking');
-                }
-            }
-
-            if (payload.distance_ft  !== undefined) document.getElementById('distanceValue').textContent = payload.distance_ft + ' ft';
-            if (payload.pan_angle    !== undefined) { currentPanAngle  = payload.pan_angle;  document.getElementById('panAngle').textContent  = payload.pan_angle  + '°'; }
-            if (payload.tilt_angle   !== undefined) { currentTiltAngle = payload.tilt_angle; document.getElementById('tiltAngle').textContent = payload.tilt_angle + '°'; }
-
-            if (payload.auto_volume_enabled !== undefined) {
-                document.getElementById('autoVolumeEnabled').checked   = payload.auto_volume_enabled;
+            if (payload.distance_ft!==undefined) document.getElementById('distanceValue').textContent=payload.distance_ft+' ft';
+            if (payload.pan_angle!==undefined)   { currentPanAngle=payload.pan_angle;   document.getElementById('panAngle').textContent=payload.pan_angle+'°'; }
+            if (payload.tilt_angle!==undefined)  { currentTiltAngle=payload.tilt_angle; document.getElementById('tiltAngle').textContent=payload.tilt_angle+'°'; }
+            if (payload.auto_volume_enabled!==undefined) {
                 document.getElementById('autoVolumeStatus').textContent =
                     payload.manual_override ? '🔒 Manual' : (payload.auto_volume_enabled ? '📏 Distance' : 'Off');
             }
-
-            if (payload.tracking_enabled !== undefined) {
-                document.getElementById('trackingEnabled').checked = payload.tracking_enabled;
-            }
+            if (payload.tracking_enabled!==undefined) document.getElementById('trackingEnabled').checked=payload.tracking_enabled;
         }
 
-        // ============================================================
-        // SEND COMMANDS
-        // ============================================================
-        function sendToPi1(payload) {
-            if (!client || !client.connected) return false;
-            client.publish(TOPIC_PI1_COMMANDS, JSON.stringify(payload), { qos: 1 });
-            return true;
-        }
+        function sendToPi1(payload) { if(!client||!client.connected) return false; client.publish(TOPIC_PI1_COMMANDS, JSON.stringify(payload), {qos:1}); return true; }
+        function sendToPi2(payload) { if(!client||!client.connected) return false; client.publish(TOPIC_PI2_COMMANDS, JSON.stringify(payload), {qos:1}); return true; }
 
-        function sendToPi2(payload) {
-            if (!client || !client.connected) return false;
-            client.publish(TOPIC_PI2_COMMANDS, JSON.stringify(payload), { qos: 1 });
-            return true;
-        }
-
-        function sendLedColor(r, g, b) { sendToPi1({ command: 'led_flash', color: [r, g, b], duration: 0.5 }); }
-        function sendLedOff()           { sendToPi1({ command: 'led_off' }); }
-
-        const toggleCooldowns = {};
-        const TOGGLE_COOLDOWN_MS = 3000;
-        function setToggleCooldown(id)    { toggleCooldowns[id] = Date.now(); }
-        function isToggleOnCooldown(id)   { const l = toggleCooldowns[id]; return l && (Date.now() - l) < TOGGLE_COOLDOWN_MS; }
-
-        function toggleGesture() {
-            const enabled = document.getElementById('gestureEnabled').checked;
-            setToggleCooldown('gestureEnabled');
-            sendToPi1({ command: 'gesture_enable', enabled });
-        }
-
+        function toggleGesture()   { sendToPi1({command:'gesture_enable',    enabled:document.getElementById('gestureEnabled').checked}); }
         function toggleVoice() {
             const enabled = document.getElementById('voiceEnabled').checked;
-            setToggleCooldown('voiceEnabled');
-            sendToPi1({ command: 'voice_enable', enabled });
+            if (!enabled) {
+                // Hide banner immediately if user disables
+                const banner = document.getElementById('voiceWarmupBanner');
+                if (banner) banner.classList.remove('visible');
+            }
+            sendToPi1({command:'voice_enable', enabled});
         }
-
-        function toggleLed() {
-            const enabled = document.getElementById('ledEnabled').checked;
-            setToggleCooldown('ledEnabled');
-            sendToPi1({ command: 'led_enable', enabled });
-        }
+        function toggleLed()       { sendToPi1({command:'led_enable',        enabled:document.getElementById('ledEnabled').checked}); }
+        function toggleTracking()  { sendToPi2({command:'tracking_enable',   enabled:document.getElementById('trackingEnabled').checked}); }
+        function toggleAutoVolume(){ sendToPi2({command:'auto_volume_enable',enabled:document.getElementById('autoVolumeEnabled').checked}); }
 
         function setVolume(value) {
-            currentVolume = parseInt(value);
-            document.getElementById('volumeValue').textContent  = currentVolume;
-            document.getElementById('volumeBar').style.width    = currentVolume + '%';
-            document.getElementById('autoVolumeEnabled').checked = false;
-            sendToPi2({ command: 'set_volume', level: currentVolume });
+            currentVolume=parseInt(value);
+            document.getElementById('volumeValue').textContent=currentVolume;
+            document.getElementById('volumeBar').style.width=currentVolume+'%';
+            sendToPi2({command:'set_volume',level:currentVolume});
         }
-
         function adjustVolume(delta) {
-            currentVolume = Math.max(0, Math.min(100, currentVolume + delta));
-            document.getElementById('volumeValue').textContent  = currentVolume;
-            document.getElementById('volumeBar').style.width    = currentVolume + '%';
-            document.getElementById('volumeSlider').value       = currentVolume;
-            document.getElementById('autoVolumeEnabled').checked = false;
-            sendToPi2({ command: 'set_volume', level: currentVolume });
+            currentVolume=Math.max(0,Math.min(100,currentVolume+delta));
+            document.getElementById('volumeValue').textContent=currentVolume;
+            document.getElementById('volumeBar').style.width=currentVolume+'%';
+            document.getElementById('volumeSlider').value=currentVolume;
+            sendToPi2({command:'set_volume',level:currentVolume});
         }
-
-        function toggleTracking()    { sendToPi2({ command: 'tracking_enable',    enabled: document.getElementById('trackingEnabled').checked    }); }
-        function toggleAutoVolume()  { sendToPi2({ command: 'auto_volume_enable', enabled: document.getElementById('autoVolumeEnabled').checked  }); }
-
-        function sendPanTilt(direction) {
-            const step = 10;
-            switch (direction) {
-                case 'right':  currentPanAngle  = Math.min( 90, currentPanAngle  + step); sendToPi2({ command: 'pan',    angle: currentPanAngle  }); break;
-                case 'left':   currentPanAngle  = Math.max(-90, currentPanAngle  - step); sendToPi2({ command: 'pan',    angle: currentPanAngle  }); break;
-                case 'down':   currentTiltAngle = Math.min( 90, currentTiltAngle + step); sendToPi2({ command: 'tilt',   angle: currentTiltAngle }); break;
-                case 'up':     currentTiltAngle = Math.max(-90, currentTiltAngle - step); sendToPi2({ command: 'tilt',   angle: currentTiltAngle }); break;
-                case 'center': currentTiltAngle = -90;                                    sendToPi2({ command: 'center', angle: currentTiltAngle }); break;
+        function sendPanTilt(dir) {
+            const step=10;
+            switch(dir) {
+                case 'right':  currentPanAngle =Math.min( 90,currentPanAngle +step); sendToPi2({command:'pan',   angle:currentPanAngle });  break;
+                case 'left':   currentPanAngle =Math.max(-90,currentPanAngle -step); sendToPi2({command:'pan',   angle:currentPanAngle });  break;
+                case 'down':   currentTiltAngle=Math.min( 90,currentTiltAngle+step); sendToPi2({command:'tilt',  angle:currentTiltAngle}); break;
+                case 'up':     currentTiltAngle=Math.max(-90,currentTiltAngle-step); sendToPi2({command:'tilt',  angle:currentTiltAngle}); break;
+                case 'center': currentTiltAngle=-90;                                 sendToPi2({command:'center',angle:currentTiltAngle}); break;
             }
         }
-
         function recalibrateDistance() {
-            if (sendToPi2({ command: 'recalibrate' })) {
-                addLog('system', 'Sent recalibration request to Pi 2');
-            } else {
-                addLog('system', '⚠️ FAILED - MQTT disconnected');
-                alert('Cannot recalibrate: Not connected to MQTT broker');
-            }
+            if (sendToPi2({command:'recalibrate'})) addLog('system','Sent recalibration request to Pi 2');
+            else { addLog('system','⚠️ FAILED - MQTT disconnected'); alert('Cannot recalibrate: Not connected to MQTT broker'); }
         }
 
-        // ============================================================
-        // LOGGING
-        // ============================================================
         function addLog(topic, message) {
-            const log  = document.getElementById('mqttLog');
-            const time = new Date().toLocaleTimeString();
-            const entry = document.createElement('div');
-            entry.className = 'log-entry';
-            entry.innerHTML = `<span class="log-time">${time}</span><span class="log-topic">${topic}</span>: ${message}`;
-            if (log.children.length === 1 && log.children[0].textContent.includes('Waiting')) log.innerHTML = '';
-            log.insertBefore(entry, log.firstChild);
-            while (log.children.length > 50) log.removeChild(log.lastChild);
+            const log=document.getElementById('mqttLog'), time=new Date().toLocaleTimeString();
+            const entry=document.createElement('div'); entry.className='log-entry';
+            entry.innerHTML=`<span class="log-time">${time}</span><span class="log-topic">${topic}</span>: ${message}`;
+            if (log.children.length===1&&log.children[0].textContent.includes('Waiting')) log.innerHTML='';
+            log.insertBefore(entry,log.firstChild);
+            while(log.children.length>50) log.removeChild(log.lastChild);
         }
+        function clearLog() { document.getElementById('mqttLog').innerHTML='<div class="log-entry">Log cleared</div>'; }
 
-        function clearLog() {
-            document.getElementById('mqttLog').innerHTML = '<div class="log-entry">Log cleared</div>';
-        }
-
-        // ============================================================
-        // INIT
-        // ============================================================
         connect();
-
-        // Send voice-disabled command on load so Pi matches the UI default
-        setTimeout(() => {
-            sendToPi1({ command: 'voice_enable', enabled: false });
-        }, 2000);
-
-        setInterval(() => {
-            if (client && client.connected) {
-                sendToPi1({ command: 'status' });
-                sendToPi2({ command: 'status' });
-            }
-        }, 5000);
+        setInterval(() => { if(client&&client.connected){ sendToPi1({command:'status'}); sendToPi2({command:'status'}); } }, 5000);
     </script>
 </body>
 </html>
