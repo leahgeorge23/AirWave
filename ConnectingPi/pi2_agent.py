@@ -70,7 +70,7 @@ current_mood = "neutral"
 
 VOL_NEAR = 70
 VOL_MID = 80
-VOL_FAR = 93
+VOL_FAR = 100
 REF_DISTANCE_FEET = 5.0
 BOUND_NEAR_MID = 4.0
 BOUND_MID_FAR = 6.0
@@ -165,14 +165,14 @@ def on_mqtt_message(client, userdata, msg):
                 print(f"[GESTURE] Action: volume -{GESTURE_VOLUME_STEP}")
             elif gesture_type == "NEXT_TRACK":
                 if playback_next():
-                    print("[GESTURE] Action: next track/seek forward")
+                    print("[GESTURE] Action: next track")
                 else:
-                    print("[GESTURE] Action failed: next track/seek forward")
+                    print("[GESTURE] Action failed: next track")
             elif gesture_type == "PREV_TRACK":
                 if playback_previous():
-                    print("[GESTURE] Action: previous track/seek backward")
+                    print("[GESTURE] Action: previous track")
                 else:
-                    print("[GESTURE] Action failed: previous track/seek backward")
+                    print("[GESTURE] Action failed: previous track")
             elif gesture_type == "PAUSE":
                 if playback_pause():
                     print("[GESTURE] Action: pause")
@@ -189,19 +189,21 @@ def on_mqtt_message(client, userdata, msg):
             print(f"[COMMAND] Received: {command} with payload: {payload}")
             
             if command == "set_volume":
-                level = payload.get("level", 50)
-                print(f"[VOLUME] Manual volume override: {level}%")
-                manual_volume_override = level
-                auto_volume_enabled = False  # Disable auto volume when manual is used
-                set_volume(level)
-                publish_status()  # Update dashboard immediately
+                display_level = payload.get("level", 50)
+                # Remap display (0-100) to real (60-100)
+                real_level = int(display_level / 100 * 40 + 60)
+                print(f"[VOLUME] Manual volume override: display={display_level}% real={real_level}%")
+                manual_volume_override = real_level
+                auto_volume_enabled = False
+                set_volume(real_level)
+                publish_status()
             elif command == "tracking_enable":
                 tracking_enabled = payload.get("enabled", True)
             elif command == "auto_volume_enable":
                 auto_volume_enabled = payload.get("enabled", True)
                 if auto_volume_enabled:
-                    manual_volume_override = None  # Clear manual override when auto is re-enabled
-                publish_status()  # Update dashboard immediately
+                    manual_volume_override = None
+                publish_status()
             elif command == "pan":
                 angle = payload.get("angle", 0)
                 current_pan = max(-90, min(90, angle))
@@ -230,8 +232,13 @@ def on_mqtt_disconnect(client, userdata, rc):
 def publish_status():
     global mqtt_client
     if mqtt_client and mqtt_client.is_connected():
+        # Remap real volume (60-100) to display volume (0-100)
+        display_volume = round((current_volume - 60) / 40 * 100)
+        display_volume = max(0, min(100, display_volume))
+
         payload = {
-            "volume": current_volume,
+            "status": "online",
+            "volume": display_volume,
             "distance_ft": round(current_distance, 1),
             "is_tracking": is_tracking,
             "tracking_enabled": tracking_enabled,
@@ -823,7 +830,7 @@ def main():
     home_tilt = tilt
     error_filtered = 0.0
     prev_error = 0.0
-    vol_current = VOL_FAR
+    vol_current = VOL_MID
     set_volume(vol_current)
 
     distance_ft = REF_DISTANCE_FEET

@@ -131,3 +131,26 @@ SPOTIFY_REFRESH_TOKEN = os.environ.get("SPOTIFY_REFRESH_TOKEN", "")
 #    export SPOTIFY_CLIENT_SECRET="your_client_secret"
 #    export SPOTIFY_REFRESH_TOKEN="your_refresh_token"
 # ============================================================================
+
+# ============================================================
+# SPOTIFY API CREDENTIALS (added by launcher)
+# ============================================================
+SPOTIFY_CLIENT_ID     = "ccd684a80e494761a074ad250bfd3e9d"
+SPOTIFY_CLIENT_SECRET = "2efb0a500cd74fc294cefa026a4bf374"
+SPOTIFY_REFRESH_TOKEN = "AQBF0twQ8qFKk-OCfoNkoKcPAjGtf9Sd-gZeOSpRxAOZSjPyQ6Cho3x1alTmBzC8qvR1perxMTfCyD43SL5aTXd-68x9wJqgT5vXv2-2f728K52g2-onqge5TqjloGU87oQ"
+
+
+# ============================================================
+# SPOTIFY API CREDENTIALS (added by launcher)
+# ============================================================
+SPOTIFY_CLIENT_ID     = "ccd684a80e494761a074ad250bfd3e9d"
+SPOTIFY_CLIENT_SECRET = "2efb0a500cd74fc294cefa026a4bf374"
+SPOTIFY_REFRESH_TOKEN = "AQAJJO-ftiuUKtHMfmEef_JrSvt4w_2iQ3oa94Qscv0TSm0dT70AnfXjARhTJOIglbFGL_t84KlifpDJGvaPDreOzZROkQ2PUkGww7-sitMcFMD7e2ZZ3XTC5yLL1F-at0E"
+
+
+# ============================================================
+# SPOTIFY API CREDENTIALS (added by launcher)
+# ============================================================
+SPOTIFY_CLIENT_ID     = "ccd684a80e494761a074ad250bfd3e9d"
+SPOTIFY_CLIENT_SECRET = "2efb0a500cd74fc294cefa026a4bf374"
+SPOTIFY_REFRESH_TOKEN = "AQALuQSwu9o2hcrmpMhWAMJ_0mcLvfPVNMqhdsV1F0zljeG118iw-R-PM3ByIPHvRE67_938A9nssj3Qw92Qh_4sbBBt2AIZYe-1eDyTRrI7FePk3-3GJi-q4LzYvFaSoDk"

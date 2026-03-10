@@ -63,24 +63,17 @@ except Exception:
 # ============================================================================
 # CONFIGURATION - EDIT config.py OR SET ENVIRONMENT VARIABLES
 # ============================================================================
-# To configure for a new computer, either:
-#   1. Edit config.py (recommended)
-#   2. Set environment variables:
-#      export MQTT_BROKER="your-computer.local"
-#      export IMU_MAC="XX:XX:XX:XX:XX:XX"
-# ============================================================================
 try:
     from config import (
         MQTT_BROKER, MQTT_PORT, MQTT_KEEPALIVE,
         IMU_MAC_ADDRESS, CHAR_NOTIFY_PRIMARY, CHAR_NOTIFY_FALLBACK
     )
 except ImportError:
-    # Fallback if config.py doesn't exist
     MQTT_BROKER_DEFAULT = "localhost"
     MQTT_BROKER = os.environ.get("MQTT_BROKER", MQTT_BROKER_DEFAULT)
     MQTT_PORT = 1883
     MQTT_KEEPALIVE = 60
-    IMU_MAC_ADDRESS = os.environ.get("IMU_MAC", "D9:41:48:15:5E:FB")  # <-- CHANGE THIS
+    IMU_MAC_ADDRESS = os.environ.get("IMU_MAC", "D9:41:48:15:5E:FB")
     CHAR_NOTIFY_PRIMARY = "0000ffe4-0000-1000-8000-00805f9a34fb"
     CHAR_NOTIFY_FALLBACK = "0000ffe9-0000-1000-8000-00805f9a34fb"
 
@@ -88,17 +81,22 @@ TOPIC_GESTURES = "home/gestures"
 TOPIC_PI1_STATUS = "home/pi1/status"
 TOPIC_PI1_COMMANDS = "home/pi1/commands"
 
-VOICE_ENABLED_AT_START = 1
-DIRECT_SPOTIFY_ENABLED = os.environ.get("PI1_DIRECT_SPOTIFY", "1") == "1"
+# ── Startup defaults (must match dashboard toggle defaults) ──────────────────
+VOICE_ENABLED_AT_START   = 0      # Voice OFF  (dashboard: unchecked)
+DIRECT_SPOTIFY_ENABLED   = os.environ.get("PI1_DIRECT_SPOTIFY", "1") == "1"
 
 
 # ============================================================================
 # GLOBAL STATE
 # ============================================================================
 mqtt_client = None
-led_enabled = True
-gesture_enabled = True
-voice_enabled = True
+led_enabled     = True
+gesture_enabled = False   # Gesture OFF  (dashboard: unchecked)
+voice_enabled   = False   # Voice OFF    (dashboard: unchecked)
+
+# When True, voice thread is in warmup — all audio input is discarded
+voice_warming_up = False
+VOICE_WARMUP_S   = 2.5    # seconds to ignore audio after voice is enabled
 
 voice_cmd_queue = None
 gesture_cmd_queue = None
@@ -140,7 +138,6 @@ def _safe_pixels_fill(color):
     try:
         pixels.fill(color)
     except Exception:
-        # Usually: /dev/mem permission error if not run with sudo
         pass
 
 def reset_bluetooth_device(mac: str):
@@ -154,13 +151,12 @@ def reset_bluetooth_device(mac: str):
             stderr=subprocess.PIPE,
             text=True
         )
-        full_input = "power on\ndisconnect {mac}\nremove {mac}\nquit\n"
+        full_input = f"power on\ndisconnect {mac}\nremove {mac}\nquit\n"
         proc.communicate(input=full_input, timeout=10)
         print("[IMU] bluetoothctl reset done")
     except Exception as e:
         print(f"[IMU] bluetoothctl reset failed: {e}")
     
-    # Restart bluetooth service
     try:
         subprocess.run(
             ["sudo", "systemctl", "restart", "bluetooth"],
@@ -170,9 +166,8 @@ def reset_bluetooth_device(mac: str):
     except Exception as e:
         print(f"[IMU] Bluetooth restart error: {e}")
     
-    time.sleep(2)  # Wait for service to come back
+    time.sleep(2)
     
-    # Power the adapter back on AFTER restart
     try:
         proc = subprocess.Popen(
             ["bluetoothctl"],
@@ -186,27 +181,24 @@ def reset_bluetooth_device(mac: str):
     except Exception as e:
         print(f"[IMU] Failed to power on adapter: {e}")
     
-    time.sleep(2)  # Give adapter time to fully initialize
+    time.sleep(2)
 
 def led_flash(color=(0, 255, 0), duration=0.8):
     """Flash LEDs with specified color."""
     if not LED_AVAILABLE or not led_enabled:
         return
 
-    pre_pause = 0.3   # pause BEFORE flash so dancing stops cleanly
-    post_pause = 0.3  # pause AFTER flash so it doesn't instantly overwrite
+    pre_pause = 0.3
+    post_pause = 0.3
 
     _pause_light_dance(pre_pause + duration + post_pause)
 
-    # stop the dancing visual immediately so flash is obvious
     _safe_pixels_fill((0, 0, 0))
     time.sleep(pre_pause)
 
-    # do the confirmation flash
     _safe_pixels_fill(color)
     time.sleep(duration)
 
-    # turn off cleanly, hold briefly
     _safe_pixels_fill((0, 0, 0))
     time.sleep(post_pause)
 
@@ -241,8 +233,7 @@ def led_volume_bar(level):
         pass
 
 # ============================
-# LIGHT DANCING (runs inside pi1_agent)
-# Uses PulseAudio source via `parec` so we can explicitly pick the 2nd USB mic.
+# LIGHT DANCING
 # ============================
 
 LIGHT_DANCE_PULSE_SOURCE = os.environ.get(
@@ -281,8 +272,8 @@ def _light_dance_loop():
         return
 
     rate = 16000
-    chunk_samples = 512              # ~32 ms
-    chunk_bytes = chunk_samples * 2  # s16le -> 2 bytes/sample
+    chunk_samples = 512
+    chunk_bytes = chunk_samples * 2
 
     cmd = [
         "parec",
@@ -314,22 +305,17 @@ def _light_dance_loop():
                 time.sleep(0.01)
                 continue
 
-            # bytes -> signed 16-bit samples
             samples = struct.unpack("<" + "h"*chunk_samples, data)
 
-            # RMS loudness (0..~1)
             s2 = 0.0
             for s in samples:
                 x = s / 32768.0
                 s2 += x * x
             rms = math.sqrt(s2 / chunk_samples)
 
-            # Smooth and scale
-
             smooth = 0.88 * smooth + 0.12 * rms
 
-# Higher gain + non-linear mapping so quiet audio still spreads across more LEDs
-            gain = 18.0                 # try 18 first; if still weak, go 25
+            gain = 18.0
             level = smooth * gain
 
             if level < 0.0:
@@ -337,7 +323,7 @@ def _light_dance_loop():
             if level > 1.0:
                 level = 1.0
 
-            level = level ** 0.45       # smaller exponent => more sensitive at low volumes (0.35–0.6 range)
+            level = level ** 0.45
 
             n_lit = int(level * NUM_LEDS)
             if n_lit < 1 and level > 0.02:
@@ -366,7 +352,7 @@ def _light_dance_loop():
             pass
 
 # ============================================================================
-# MQTT CALLBACKS (paho-mqtt Callback API v2)
+# MQTT CALLBACKS
 # ============================================================================
 def on_mqtt_connect(client, userdata, flags, reason_code, properties):
     if reason_code == 0:
@@ -417,14 +403,34 @@ def on_mqtt_message(client, userdata, msg):
             gesture_enabled = payload.get("enabled", True)
             print(f"[IMU] Enabled: {gesture_enabled}")
             
-            # If re-enabling after being disabled, force reconnect
             if not was_enabled and gesture_enabled:
                 force_imu_reconnect = True
                 print("[IMU] Will reconnect IMU on next loop")
 
         elif command == "voice_enable":
-            voice_enabled = payload.get("enabled", True)
+            global voice_warming_up
+            new_state = payload.get("enabled", True)
+
+            # Always clear queue (on both enable and disable)
+            if voice_cmd_queue is not None:
+                cleared = 0
+                while not voice_cmd_queue.empty():
+                    try:
+                        voice_cmd_queue.get_nowait(); cleared += 1
+                    except: break
+                if cleared > 0:
+                    print(f"[VOICE] Cleared {cleared} queued commands")
+
+            if new_state and not voice_enabled:
+                # Starting warmup — thread discards all audio for VOICE_WARMUP_S seconds
+                voice_warming_up = True
+                print(f"[VOICE] Warmup started ({VOICE_WARMUP_S}s) — ignoring audio")
+            else:
+                voice_warming_up = False
+
+            voice_enabled = new_state
             print(f"[VOICE] Enabled: {voice_enabled}")
+            publish_status("online")  # tell dashboard about warmup state
 
         elif command == "status":
             publish_status("online")
@@ -438,15 +444,13 @@ def publish_gesture(gesture_type, source="gesture"):
     if mqtt_client and mqtt_client.is_connected():
         payload = {
             "type": gesture_type,
-            "source": source,   # "gesture" or "voice"
+            "source": source,
             "timestamp": time.time(),
             "device": "pi1",
         }
         mqtt_client.publish(TOPIC_GESTURES, json.dumps(payload))
         print(f"[MQTT] Published: {gesture_type} ({source})")
 
-    # Optional direct Spotify control from Pi 1 so transport can still work
-    # when the Pi 2 consumer path is unavailable.
     if DIRECT_SPOTIFY_ENABLED:
         threading.Thread(
             target=_execute_direct_spotify_command,
@@ -454,11 +458,10 @@ def publish_gesture(gesture_type, source="gesture"):
             daemon=True,
         ).start()
 
-    # LED feedback
     if source == "gesture":
-        led_flash((0, 255, 0), 0.12)  # green
+        led_flash((0, 255, 0), 0.12)
     else:
-        led_flash((0, 0, 255), 0.12)  # blue
+        led_flash((0, 0, 255), 0.12)
 
 
 def _execute_direct_spotify_command(command):
@@ -495,6 +498,7 @@ def publish_status(status):
             "led_enabled": led_enabled,
             "gesture_enabled": gesture_enabled,
             "voice_enabled": voice_enabled,
+            "voice_warming_up": voice_warming_up,
             "imu_mode": imu_mode,
             "imu_connected": imu_connected,
             "timestamp": time.time(),
@@ -523,7 +527,6 @@ def map_voice_command_strict(text):
     if re.search(r"\b(volume down|turn down|quieter|softer)\b", t):
         intents.add("VOL_DOWN")
 
-    # If ASR output mixes commands ("play pause ..."), skip instead of guessing.
     if len(intents) != 1:
         return None
 
@@ -531,7 +534,7 @@ def map_voice_command_strict(text):
 
 
 # ============================================================================
-# COMMAND DISPATCHER (voice first, then gestures)
+# COMMAND DISPATCHER (voice priority)
 # ============================================================================
 async def dispatch_commands():
     print("[DISPATCH] dispatcher started")
@@ -556,12 +559,11 @@ async def dispatch_commands():
         except Exception as e:
             print("[DISPATCH] CRASHED:", e)
             traceback.print_exc()
-            await asyncio.sleep(1.0)  # keep it alive so we can see repeated failures
+            await asyncio.sleep(1.0)
 
 # ============================================================================
-# IMU GESTURE DETECTION (based on your original IMU code)
+# IMU GESTURE DETECTION
 # ============================================================================
-# IMU settings loaded from config.py
 IMU_MAC = IMU_MAC_ADDRESS
 
 MODE_IDLE = "IDLE"
@@ -569,7 +571,6 @@ MODE_COMMAND = "COMMAND"
 imu_mode = MODE_IDLE
 imu_connected = False
 
-# ---------- Wake / Cancel: DOUBLE FLICK ----------
 FLICK_GMAG_THR_DPS = 750.0
 FLICK_REFRACTORY_S = 0.20
 FLICK_PEAK_WINDOW_S = 0.25
@@ -577,22 +578,18 @@ FLICK_PEAK_WINDOW_S = 0.25
 DOUBLE_FLICK_REQUIRED = 2
 DOUBLE_FLICK_MAX_SPAN_S = 0.85
 
-# ---------- Command timing ----------
 COMMAND_TIMEOUT_S = 5.0
 COMMAND_READY_DELAY_S = 1.0
 REARM_READY_DELAY_S = 0.8
 POST_COMMAND_COOLDOWN_S = 0.40
 REARM_IDLE_S = 0.25
 
-# ---------- History ----------
 GESTURE_WINDOW_S = 0.60
 HIST_KEEP_S = 2.0
 
-# ---------- Twist detection ----------
 TWIST_GY_THR_DPS = 180.0
 TWIST_RIGHT_IS_POSITIVE_GY = True
 
-# ---------- Swipe detection ----------
 SWIPE_DAZ_THR_G = 0.55
 SWIPE_TWIST_REJECT_GY_DPS = 260.0
 SWIPE_UP_IS_POSITIVE_DAZ = True
@@ -600,7 +597,6 @@ SWIPE_UP_IS_POSITIVE_DAZ = True
 DEBUG_COMMAND = False
 
 
-# ---------------- BLE packet parsing ----------------
 def parse_wt901_packets(buf: bytearray):
     out = []
     i = 0
@@ -630,37 +626,20 @@ def mag3(x, y, z):
     return math.sqrt(x * x + y * y + z * z)
 
 
-# ---------------- Gesture Engine ----------------
 class GestureEngine:
-    """
-    State machine:
-      - IDLE: waits for DOUBLE FLICK to arm
-      - COMMAND: after delay, accepts ONE gesture (twist/swipe), then returns to IDLE
-      - Re-arm: short idle and automatically re-enters COMMAND mode
-    """
     def __init__(self):
         self.mode = MODE_IDLE
-
-        # history: (t, ax, ay, az, gx, gy, gz)
         self.hist = deque()
-
-        # flick bookkeeping
         self.flick_times = deque()
         self.last_flick_t = 0.0
-
-        # command bookkeeping
         self.cmd_start_t = 0.0
         self.last_cmd_t = 0.0
         self.ready_announced = False
         self.entered_via_rearm = False
-
-        # command-mode baseline for az deltas
         self.az0 = None
         self.az0_accum = 0.0
         self.az0_n = 0
         self.az0_target_n = 6
-
-        # re-arm support
         self.pending_rearm = False
         self.rearm_at_t = 0.0
 
@@ -702,12 +681,10 @@ class GestureEngine:
             return None
         return max(w, key=key_fn)
 
-    # ---- flick event ----
     def _detect_flick_event(self):
         now = time.time()
         if now - self.last_flick_t < FLICK_REFRACTORY_S:
             return False
-
         gmag_peak = self._peak_value(
             FLICK_PEAK_WINDOW_S,
             lambda s: mag3(s[4], s[5], s[6])
@@ -717,26 +694,20 @@ class GestureEngine:
             return True
         return False
 
-    # ---- double flick detection ----
     def _detect_double_flick(self):
         now = time.time()
         if not self._detect_flick_event():
             return False
-
         self.flick_times.append(now)
-
-        # keep only within span
         while self.flick_times and (now - self.flick_times[0]) > DOUBLE_FLICK_MAX_SPAN_S:
             self.flick_times.popleft()
-
         if len(self.flick_times) >= DOUBLE_FLICK_REQUIRED:
             self.flick_times.clear()
             return True
         return False
 
-    # ---- gestures ----
     def _detect_twist(self):
-        s = self._peak_sample(GESTURE_WINDOW_S, key_fn=lambda x: abs(x[5]))  # gy
+        s = self._peak_sample(GESTURE_WINDOW_S, key_fn=lambda x: abs(x[5]))
         if not s:
             return None
         gy = s[5]
@@ -763,24 +734,18 @@ class GestureEngine:
     def _detect_swipe_by_daz(self):
         if self.az0 is None:
             return None
-
-        # reject swipe if twist is too strong
         gy_peak = self._peak_value(GESTURE_WINDOW_S, lambda s: abs(s[5]))
         if gy_peak is not None and gy_peak > SWIPE_TWIST_REJECT_GY_DPS:
             return None
-
         w = self._window(GESTURE_WINDOW_S)
         if not w:
             return None
-
         daz_vals = [(s[3] - self.az0) for s in w]
         daz_peak = max(daz_vals)
         daz_trough = min(daz_vals)
         daz_best = daz_peak if abs(daz_peak) >= abs(daz_trough) else daz_trough
-
         if DEBUG_COMMAND:
             print(f"[dbg] az0={self.az0:+.3f} daz_best={daz_best:+.3f} | gy_peak={gy_peak if gy_peak is not None else -1:+.1f}")
-
         if abs(daz_best) >= SWIPE_DAZ_THR_G:
             if SWIPE_UP_IS_POSITIVE_DAZ:
                 return "PAUSE" if daz_best > 0 else "PLAY"
@@ -791,21 +756,17 @@ class GestureEngine:
     async def step(self):
         now = time.time()
 
-        # Handle pending re-arm
         if self.pending_rearm and now >= self.rearm_at_t:
             self.pending_rearm = False
             self._enter_command_mode(via_rearm=True)
             return "REENTER_COMMAND_MODE"
 
-        # -------- IDLE --------
         if self.mode == MODE_IDLE:
             if self._detect_double_flick():
                 self._enter_command_mode(via_rearm=False)
                 return "ENTER_COMMAND_MODE"
             return None
 
-        # -------- COMMAND --------
-        # double flick cancels back to idle
         if self._detect_double_flick():
             self.mode = MODE_IDLE
             self.clear_history()
@@ -814,7 +775,6 @@ class GestureEngine:
         elapsed = now - self.cmd_start_t
         ready_delay = REARM_READY_DELAY_S if self.entered_via_rearm else COMMAND_READY_DELAY_S
 
-        # ready delay
         if elapsed < ready_delay:
             return None
 
@@ -822,7 +782,6 @@ class GestureEngine:
             self.ready_announced = True
             return "READY_FOR_GESTURE"
 
-        # timeout
         if elapsed > COMMAND_TIMEOUT_S:
             self.mode = MODE_IDLE
             self.clear_history()
@@ -834,7 +793,6 @@ class GestureEngine:
         if not self._update_command_baseline():
             return None
 
-        # detect gesture
         g = self._detect_twist()
         if g:
             self.last_cmd_t = now
@@ -856,12 +814,7 @@ class GestureEngine:
         return None
 
 
-# ---------------- BLE runner ----------------
 async def imu_run(client: "BleakClient", notify_uuid: str, label: str):
-    """
-    Reads WT901 packets from notify UUID, decodes accel/gyro,
-    feeds the GestureEngine, and queues recognized gestures.
-    """
     global imu_mode
     sample_queue: asyncio.Queue = asyncio.Queue(maxsize=800)
     buf = bytearray()
@@ -901,7 +854,6 @@ async def imu_run(client: "BleakClient", notify_uuid: str, label: str):
                 imu_mode = engine.mode
                 publish_status("online")
 
-            # If gestures disabled, keep engine running but skip publishes
             if evt and not gesture_enabled:
                 continue
 
@@ -957,7 +909,6 @@ async def run_gesture_detection():
     except Exception as e:
         print(f"[IMU] Connection error: {e}")
         
-        # Detect stale connection errors and auto-reset
         error_str = str(e).lower()
         if any(keyword in error_str for keyword in [
             "software caused connection abort",
@@ -983,156 +934,10 @@ async def run_gesture_detection():
 # ============================================================================
 # VOICE COMMAND DETECTION (runs in a thread)
 # ============================================================================
-def run_voice_and_fft(loop: asyncio.AbstractEventLoop):
-    import speech_recognition as sr
-
-    r = sr.Recognizer()
-
-    RATE = 16000
-    CHUNK = 1024
-    FFT_N = 1024
-    ALPHA = 0.18
-    GATE = 0.05
-    DECAY = 0.985
-
-    BASS = (30, 180)
-    MIDS = (180, 1500)
-    HIGHS = (1500, 6000)
-
-    window = np.hanning(FFT_N).astype(np.float32)
-
-    sb = sm = sh = 0.0
-    pb = pm = ph = 1e-6
-
-    pa = pyaudio.PyAudio()
-
-    # pick the same input device pi1_agent already prefers
-    mic_index = vc.DEVICE_INDEX
-
-    # open ONE shared mic stream
-    try:
-        stream = pa.open(
-            format=pyaudio.paInt16,
-            channels=1,
-            rate=RATE,
-            input=True,
-            input_device_index=mic_index,
-            frames_per_buffer=CHUNK,
-        )
-    except Exception as e:
-        print(f"[VOICE+FFT] Could not open mic (device_index={mic_index}): {e}")
-        return
-
-    print(f"[VOICE+FFT] Mic opened once (device_index={mic_index})")
-
-    # simple speech buffer (VAD-ish)
-    speech_frames = []
-    speech_active = False
-    last_voice_time = 0.0
-
-    def clamp01(x):
-        return 0.0 if x < 0.0 else (1.0 if x > 1.0 else x)
-
-    def band_mean(freqs, mags, lo, hi):
-        idx = np.where((freqs >= lo) & (freqs < hi))[0]
-        if idx.size == 0:
-            return 0.0
-        return float(np.mean(mags[idx]))
-
-    try:
-        while True:
-            if not voice_enabled:
-                time.sleep(0.1)
-                continue
-
-            data = stream.read(CHUNK, exception_on_overflow=False)
-            samples = np.frombuffer(data, dtype=np.int16).astype(np.float32)
-
-            # ---------- FFT levels (every chunk) ----------
-            x = (samples[:FFT_N] * window) if len(samples) >= FFT_N else (np.pad(samples, (0, FFT_N-len(samples))) * window)
-            mags = np.abs(np.fft.rfft(x))
-            freqs = np.fft.rfftfreq(FFT_N, d=1.0 / RATE)
-
-            rb = band_mean(freqs, mags, BASS[0], BASS[1])
-            rm = band_mean(freqs, mags, MIDS[0], MIDS[1])
-            rh = band_mean(freqs, mags, HIGHS[0], HIGHS[1])
-
-            pb = max(rb, pb * DECAY)
-            pm = max(rm, pm * DECAY)
-            ph = max(rh, ph * DECAY)
-
-            nb = clamp01(rb / (pb + 1e-6))
-            nm = clamp01(rm / (pm + 1e-6))
-            nh = clamp01(rh / (ph + 1e-6))
-
-            nb = 0.0 if nb < GATE else nb
-            nm = 0.0 if nm < GATE else nm
-            nh = 0.0 if nh < GATE else nh
-
-            sb = (1 - ALPHA) * sb + ALPHA * nb
-            sm = (1 - ALPHA) * sm + ALPHA * nm
-            sh = (1 - ALPHA) * sh + ALPHA * nh
-
-            # publish FFT levels for light_dance.py
-            if mqtt_client and mqtt_client.is_connected():
-                mqtt_client.publish(
-                    "home/pi1/audio_fft",
-                    json.dumps({"bass": sb, "mids": sm, "highs": sh, "ts": time.time()})
-                )
-
-            # ---------- crude voice activity detection ----------
-            rms = float(np.sqrt(np.mean(samples * samples)))
-            now = time.time()
-
-            if rms > 900:  # tune if needed
-                if not speech_active:
-                    speech_frames = []
-                    speech_active = True
-                speech_frames.append(data)
-                last_voice_time = now
-            else:
-                if speech_active:
-                    # end speech after 0.5s quiet
-                    if now - last_voice_time > 0.5:
-                        speech_active = False
-
-                        raw = b"".join(speech_frames)
-                        speech_frames = []
-
-                        audio = sr.AudioData(raw, RATE, 2)
-                        try:
-                            text = r.recognize_google(audio, language="en-US")
-                            print(f"[VOICE] Heard: {text}")
-                            cmd = map_voice_command_strict(text)
-                            if cmd:
-                                print(f"[VOICE] Recognized command: {cmd}")
-                                loop.call_soon_threadsafe(voice_cmd_queue.put_nowait, cmd)
-                        except sr.UnknownValueError:
-                            pass
-                        except sr.RequestError as e:
-                            print(f"[VOICE] Google STT error: {e}")
-
-    except Exception as e:
-        print(f"[VOICE+FFT] Error: {e}")
-
-    finally:
-        try:
-            stream.stop_stream()
-            stream.close()
-        except Exception:
-            pass
-        try:
-            pa.terminate()
-        except Exception:
-            pass
-
-
 def run_voice_detection(loop: asyncio.AbstractEventLoop):
     def get_input_devices():
-        """Return list of (index, name, max_inputs) using PyAudio if possible."""
         try:
             import pyaudio
-
             pa = pyaudio.PyAudio()
             devices = []
             try:
@@ -1147,18 +952,14 @@ def run_voice_detection(loop: asyncio.AbstractEventLoop):
             return None
 
     def list_microphones():
-        """Print available input devices with indexes to help select DEVICE_INDEX."""
         print("[VOICE] Listing input devices...")
         devices = get_input_devices()
         if devices:
             for i, name, inputs in devices:
                 print(f"  {i}: {name} inputs={inputs}")
             return
-
-        # Fallback if PyAudio path fails
         try:
             import speech_recognition as sr
-
             names = sr.Microphone.list_microphone_names()
             for i, name in enumerate(names):
                 print(f"  {i}: {name}")
@@ -1172,17 +973,13 @@ def run_voice_detection(loop: asyncio.AbstractEventLoop):
         return
 
     r = sr.Recognizer()
-
-    # Make behavior consistent (avoid drift / long phrases)
     r.dynamic_energy_threshold = False
-    r.energy_threshold = int(os.environ.get("VOICE_ENERGY", "350"))
+    r.energy_threshold = int(os.environ.get("VOICE_ENERGY", "700"))
     r.pause_threshold = float(os.environ.get("VOICE_PAUSE_THRESHOLD", "0.35"))
     r.non_speaking_duration = float(os.environ.get("VOICE_NON_SPEAKING_DURATION", "0.20"))
 
-    # Choose a microphone: prefer first device with inputs>0; otherwise fallback
     mic_index = vc.DEVICE_INDEX
 
-    # --- FORCE VOICE_DEVICE override if provided ---
     voice_dev_env = os.environ.get("VOICE_DEVICE")
     if voice_dev_env is not None and str(voice_dev_env).strip() != "":
         try:
@@ -1190,7 +987,7 @@ def run_voice_detection(loop: asyncio.AbstractEventLoop):
             print(f"[VOICE] Using VOICE_DEVICE env override: {mic_index}")
         except ValueError:
             print(f"[VOICE] Invalid VOICE_DEVICE='{voice_dev_env}', ignoring")
-    # ------------------------------------------------
+
     devices_info = get_input_devices()
     chosen_name = None
 
@@ -1211,7 +1008,6 @@ def run_voice_detection(loop: asyncio.AbstractEventLoop):
                 return
         chosen_name = all_devices[mic_index][1]
     else:
-        # Fallback to SpeechRecognition list (names only)
         try:
             devices = sr.Microphone.list_microphone_names()
             if not devices:
@@ -1245,9 +1041,54 @@ def run_voice_detection(loop: asyncio.AbstractEventLoop):
                     return
             print("[VOICE] Voice detection active; listening for commands")
 
+            was_disabled = False
+            pa_stream = source.stream
+
             while True:
                 if not voice_enabled:
+                    if not was_disabled:
+                        was_disabled = True
+                        try:
+                            if pa_stream and pa_stream.is_active():
+                                pa_stream.stop_stream()
+                                print("[VOICE] Mic stream stopped (voice disabled)")
+                        except Exception:
+                            pass
                     time.sleep(0.1)
+                    continue
+
+                if was_disabled:
+                    was_disabled = False
+                    # Restart mic stream
+                    try:
+                        if pa_stream and not pa_stream.is_active():
+                            pa_stream.start_stream()
+                            print("[VOICE] Mic stream resumed")
+                    except Exception:
+                        pass
+
+                    # Reset Vosk state
+                    if hasattr(vc, "_rec") and vc._rec is not None:
+                        try: vc._rec.Reset()
+                        except: pass
+
+                    # --- WARMUP: drain stale audio for VOICE_WARMUP_S seconds ---
+                    print(f"[VOICE] Warming up — discarding audio for {VOICE_WARMUP_S}s...")
+                    warmup_end = time.time() + VOICE_WARMUP_S
+                    while time.time() < warmup_end:
+                        if not voice_enabled:
+                            break   # user disabled again during warmup
+                        try:
+                            # Short listens to drain the buffer without processing
+                            r.listen(source, timeout=0.2, phrase_time_limit=0.2)
+                        except:
+                            pass
+                    
+                    # Clear warmup flag and notify dashboard
+                    global voice_warming_up
+                    voice_warming_up = False
+                    publish_status("online")
+                    print("[VOICE] Warmup done — ready for commands")
                     continue
 
                 try:
@@ -1269,18 +1110,13 @@ def run_voice_detection(loop: asyncio.AbstractEventLoop):
                     if partial_text and os.environ.get("VOICE_PRINT_PARTIALS", "1") == "1":
                         print(f"[VOICE] Partial: {partial_text}")
 
-                    # Agent-level partial processing: trigger IMMEDIATELY on first valid command
                     if not hasattr(run_voice_detection, "_last_cmd"):
                         run_voice_detection._last_cmd = None
                         run_voice_detection._last_cmd_t = 0.0
 
-                    # NEW APPROACH: Extract first valid command from partial immediately
                     if not final_text and partial_text:
-                        # Check if partial contains any command word
                         cmd_from_partial = map_voice_command_strict(partial_text)
-                        if cmd_from_partial:
-                            # We found a valid command in the partial!
-                            # Use it immediately without waiting for stability
+                        if cmd_from_partial and cmd_from_partial not in ("PREV_TRACK"):
                             final_text = partial_text
                             final_from_partial = True
                             print(f"[VOICE] Triggering on partial: {partial_text}")
@@ -1296,7 +1132,6 @@ def run_voice_detection(loop: asyncio.AbstractEventLoop):
 
                     print(f"[VOICE] Heard (offline): {text}")
 
-                    # CRITICAL: Reset Vosk after EVERY final to prevent stacking
                     if hasattr(vc, "_rec") and vc._rec is not None:
                         try:
                             vc._rec.Reset()
@@ -1318,7 +1153,6 @@ def run_voice_detection(loop: asyncio.AbstractEventLoop):
                         print(f"[VOICE] Recognized command: {cmd}")
                         loop.call_soon_threadsafe(voice_cmd_queue.put_nowait, cmd)
                         
-                        # CRITICAL: Reset Vosk AGAIN immediately after publishing command
                         if hasattr(vc, "_rec") and vc._rec is not None:
                             try:
                                 vc._rec.Reset()
@@ -1348,7 +1182,6 @@ async def main():
     print("Pi 1 Agent - Starting")
     print("=" * 60)
 
-    # ---- MQTT setup ----
     mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="pi1_agent")
     mqtt_client.on_connect = on_mqtt_connect
     mqtt_client.on_message = on_mqtt_message
@@ -1373,1284 +1206,25 @@ async def main():
     gesture_cmd_queue = asyncio.Queue()
     print("[DISPATCH] queues created on running loop")
     start_light_dancing()
- 
-    # ---- Voice thread (optional) ----
-    if VOICE_ENABLED_AT_START:
-        voice_thread = threading.Thread(target=run_voice_detection, args=(loop,), daemon=True)
-        voice_thread.start()
-    else:
-        print("[VOICE] Skipping voice detection (ENABLE_VOICE=0)")
 
-    # ---- Dispatcher (voice priority) ----
+    # Voice thread only starts if VOICE_ENABLED_AT_START=1
+    # Since it's 0, the thread is skipped entirely — voice can still be
+    # enabled later via MQTT but the thread won't be running to receive it.
+    # The thread is always started so it can respond to voice_enable commands.
+    voice_thread = threading.Thread(target=run_voice_detection, args=(loop,), daemon=True)
+    voice_thread.start()
+    print("[VOICE] Thread started (voice_enabled=False; waiting for dashboard enable)")
+
     dispatcher_task = asyncio.create_task(dispatch_commands())
 
     try:
         while True:
             global force_imu_reconnect
             
-            # If gestures are disabled, just sleep and check again
             if not gesture_enabled and not force_imu_reconnect:
                 await asyncio.sleep(1.0)
                 continue
             
-            # Clear reconnect flag and run detection
-            if force_imu_reconnect:
-                print("[IMU] Reconnecting due to toggle...")
-                force_imu_reconnect = False
-            
-            await run_gesture_detection()
-            print("[IMU] gesture task ended; retrying in 2s...")
-            await asyncio.sleep(2.0)
-
-    except KeyboardInterrupt:
-        print("\n[MAIN] Shutting down...")
-
-    finally:
-        dispatcher_task.cancel()
-        try:
-            publish_status("offline")
-        except Exception:
-            pass
-        try:
-            mqtt_client.loop_stop()
-            mqtt_client.disconnect()
-        except Exception:
-            pass
-        led_off()
-        print("[MAIN] Goodbye!")
-
-
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\nStopping.")
-# Voice mapping (offline Vosk module)
-import voice_commands_offline as vc
-try:
-    import spotify_controller as spotify
-    SPOTIFY_DIRECT_AVAILABLE = True
-except Exception:
-    spotify = None
-    SPOTIFY_DIRECT_AVAILABLE = False
-
-# BLE client
-try:
-    from bleak import BleakClient
-    BLEAK_AVAILABLE = True
-except Exception:
-    BLEAK_AVAILABLE = False
-
-
-# ============================================================================
-# CONFIGURATION - EDIT config.py OR SET ENVIRONMENT VARIABLES
-# ============================================================================
-# To configure for a new computer, either:
-#   1. Edit config.py (recommended)
-#   2. Set environment variables:
-#      export MQTT_BROKER="your-computer.local"
-#      export IMU_MAC="XX:XX:XX:XX:XX:XX"
-# ============================================================================
-try:
-    from config import (
-        MQTT_BROKER, MQTT_PORT, MQTT_KEEPALIVE,
-        IMU_MAC_ADDRESS, CHAR_NOTIFY_PRIMARY, CHAR_NOTIFY_FALLBACK
-    )
-except ImportError:
-    # Fallback if config.py doesn't exist
-    MQTT_BROKER_DEFAULT = "localhost"
-    MQTT_BROKER = os.environ.get("MQTT_BROKER", MQTT_BROKER_DEFAULT)
-    MQTT_PORT = 1883
-    MQTT_KEEPALIVE = 60
-    IMU_MAC_ADDRESS = os.environ.get("IMU_MAC", "D9:41:48:15:5E:FB")  # <-- CHANGE THIS
-    CHAR_NOTIFY_PRIMARY = "0000ffe4-0000-1000-8000-00805f9a34fb"
-    CHAR_NOTIFY_FALLBACK = "0000ffe9-0000-1000-8000-00805f9a34fb"
-
-TOPIC_GESTURES = "home/gestures"
-TOPIC_PI1_STATUS = "home/pi1/status"
-TOPIC_PI1_COMMANDS = "home/pi1/commands"
-
-VOICE_ENABLED_AT_START = 1
-DIRECT_SPOTIFY_ENABLED = os.environ.get("PI1_DIRECT_SPOTIFY", "1") == "1"
-
-
-# ============================================================================
-# GLOBAL STATE
-# ============================================================================
-mqtt_client = None
-led_enabled = True
-gesture_enabled = True
-voice_enabled = True
-
-voice_cmd_queue = None
-gesture_cmd_queue = None
-
-# Trigger for forcing IMU reconnection
-force_imu_reconnect = False
-
-# ============================================================================
-# LED FEEDBACK MODULE (best-effort; won't crash if not sudo)
-# ============================================================================
-LED_AVAILABLE = False
-pixels = None
-
-try:
-    import board
-    import neopixel
-
-    LED_PIN = board.D21
-    NUM_LEDS = 60
-    BRIGHTNESS = 0.5
-
-    pixels = neopixel.NeoPixel(
-        LED_PIN,
-        NUM_LEDS,
-        brightness=BRIGHTNESS,
-        auto_write=True,
-        pixel_order=neopixel.GRB
-    )
-    LED_AVAILABLE = True
-except Exception:
-    LED_AVAILABLE = False
-    pixels = None
-
-
-def _safe_pixels_fill(color):
-    """Never let LED writes crash the agent."""
-    if not LED_AVAILABLE or pixels is None:
-        return
-    try:
-        pixels.fill(color)
-    except Exception:
-        # Usually: /dev/mem permission error if not run with sudo
-        pass
-
-
-def led_flash(color=(0, 255, 0), duration=0.2):
-    """Flash LEDs with specified color."""
-    if not LED_AVAILABLE or not led_enabled:
-        return
-    _safe_pixels_fill(color)
-    time.sleep(duration)
-    _safe_pixels_fill((0, 0, 0))
-
-
-def led_set_color(color):
-    """Set LEDs to a solid color."""
-    if not LED_AVAILABLE or not led_enabled:
-        return
-    _safe_pixels_fill(color)
-
-
-def led_off():
-    """Turn off all LEDs."""
-    if not LED_AVAILABLE:
-        return
-    _safe_pixels_fill((0, 0, 0))
-
-
-def led_volume_bar(level):
-    """Display volume level as LED bar (0-100)."""
-    if not LED_AVAILABLE or not led_enabled:
-        return
-    try:
-        num_lit = int((level / 100.0) * NUM_LEDS)
-        for i in range(NUM_LEDS):
-            if i < num_lit:
-                green = int(255 * (1 - i / NUM_LEDS))
-                red = int(255 * (i / NUM_LEDS))
-                pixels[i] = (red, green, 0)
-            else:
-                pixels[i] = (0, 0, 0)
-    except Exception:
-        pass
-
-
-# ============================================================================
-# MQTT CALLBACKS (paho-mqtt Callback API v2)
-# ============================================================================
-def on_mqtt_connect(client, userdata, flags, reason_code, properties):
-    if reason_code == 0:
-        print(f"[MQTT] Connected to broker at {MQTT_BROKER}")
-        client.subscribe(TOPIC_PI1_COMMANDS)
-        print(f"[MQTT] Subscribed to {TOPIC_PI1_COMMANDS}")
-        publish_status("online")
-    else:
-        print(f"[MQTT] Connection failed (reason_code={reason_code})")
-
-
-def on_mqtt_disconnect(client, userdata, disconnect_flags, reason_code, properties):
-    print(f"[MQTT] Disconnected (reason_code={reason_code})")
-
-
-def on_mqtt_message(client, userdata, msg):
-    """Handle incoming commands from dashboard."""
-    global led_enabled, gesture_enabled, voice_enabled
-
-    try:
-        payload = json.loads(msg.payload.decode())
-        command = payload.get("command", "")
-        print(f"[MQTT] Received command: {command}")
-
-        if command == "led_flash":
-            color = tuple(payload.get("color", [0, 255, 0]))
-            duration = payload.get("duration", 0.3)
-            led_flash(color, duration)
-
-        elif command == "led_set":
-            color = tuple(payload.get("color", [0, 0, 0]))
-            led_set_color(color)
-
-        elif command == "led_off":
-            led_off()
-
-        elif command == "led_volume":
-            level = payload.get("level", 50)
-            led_volume_bar(level)
-
-        elif command == "led_enable":
-            led_enabled = payload.get("enabled", True)
-            print(f"[LED] Enabled: {led_enabled}")
-
-        elif command == "gesture_enable":
-            global force_imu_reconnect
-            was_enabled = gesture_enabled
-            gesture_enabled = payload.get("enabled", True)
-            print(f"[IMU] Enabled: {gesture_enabled}")
-            
-            # If re-enabling after being disabled, force reconnect
-            if not was_enabled and gesture_enabled:
-                force_imu_reconnect = True
-                print("[IMU] Will reconnect IMU on next loop")
-
-        elif command == "voice_enable":
-            voice_enabled = payload.get("enabled", True)
-            print(f"[VOICE] Enabled: {voice_enabled}")
-            
-            # Clear any buffered voice commands when disabling
-            if not voice_enabled and voice_cmd_queue is not None:
-                cleared_count = 0
-                while not voice_cmd_queue.empty():
-                    try:
-                        voice_cmd_queue.get_nowait()
-                        cleared_count += 1
-                    except:
-                        break
-                if cleared_count > 0:
-                    print(f"[VOICE] Cleared {cleared_count} queued commands")
-
-        elif command == "status":
-            publish_status("online")
-
-    except Exception as e:
-        print(f"[MQTT] Error processing message: {e}")
-
-
-def publish_gesture(gesture_type, source="gesture"):
-    """Publish gesture/voice command to MQTT."""
-    if mqtt_client and mqtt_client.is_connected():
-        payload = {
-            "type": gesture_type,
-            "source": source,   # "gesture" or "voice"
-            "timestamp": time.time(),
-            "device": "pi1",
-        }
-        mqtt_client.publish(TOPIC_GESTURES, json.dumps(payload))
-        print(f"[MQTT] Published: {gesture_type} ({source})")
-
-    # Optional direct Spotify control from Pi 1 so transport can still work
-    # when the Pi 2 consumer path is unavailable.
-    if DIRECT_SPOTIFY_ENABLED:
-        threading.Thread(
-            target=_execute_direct_spotify_command,
-            args=(gesture_type,),
-            daemon=True,
-        ).start()
-
-    # LED feedback
-    if source == "gesture":
-        led_flash((0, 255, 0), 0.12)  # green
-    else:
-        led_flash((0, 0, 255), 0.12)  # blue
-
-
-def _execute_direct_spotify_command(command):
-    if not SPOTIFY_DIRECT_AVAILABLE or spotify is None:
-        return False
-
-    command_map = {
-        "PLAY": spotify.play,
-        "PAUSE": spotify.pause,
-        "NEXT_TRACK": spotify.next_track,
-        "PREV_TRACK": spotify.previous_track,
-    }
-    fn = command_map.get(command)
-    if fn is None:
-        return False
-
-    try:
-        ok = bool(fn())
-        if ok:
-            print(f"[SPOTIFY] Direct command ok: {command}")
-        else:
-            print(f"[SPOTIFY] Direct command failed: {command}")
-        return ok
-    except Exception as e:
-        print(f"[SPOTIFY] Direct command error ({command}): {e}")
-        return False
-
-
-def publish_status(status):
-    """Publish Pi 1 status."""
-    if mqtt_client and mqtt_client.is_connected():
-        payload = {
-            "status": status,
-            "led_enabled": led_enabled,
-            "gesture_enabled": gesture_enabled,
-            "voice_enabled": voice_enabled,
-            "imu_mode": imu_mode,
-            "imu_connected": imu_connected,
-            "timestamp": time.time(),
-        }
-        mqtt_client.publish(TOPIC_PI1_STATUS, json.dumps(payload))
-
-
-def map_voice_command_strict(text):
-    """Map voice text to one clear command; return None for ambiguous/noise."""
-    if not text:
-        return None
-
-    t = " ".join(str(text).strip().lower().split())
-    intents = set()
-
-    if re.search(r"\b(next|skip)\b", t):
-        intents.add("NEXT_TRACK")
-    if re.search(r"\b(previous|back)\b", t):
-        intents.add("PREV_TRACK")
-    if re.search(r"\b(pause|stop)\b", t):
-        intents.add("PAUSE")
-    if re.search(r"\bresume\b", t) or re.search(r"\bplay\b", t):
-        intents.add("PLAY")
-    if re.search(r"\b(volume up|turn up|louder|higher)\b", t):
-        intents.add("VOL_UP")
-    if re.search(r"\b(volume down|turn down|quieter|softer)\b", t):
-        intents.add("VOL_DOWN")
-
-    # If ASR output mixes commands ("play pause ..."), skip instead of guessing.
-    if len(intents) != 1:
-        return None
-
-    return next(iter(intents))
-
-
-# ============================================================================
-# COMMAND DISPATCHER (voice first, then gestures)
-# ============================================================================
-async def dispatch_commands():
-    print("[DISPATCH] dispatcher started")
-    while True:
-        try:
-            try:
-                voice_cmd = voice_cmd_queue.get_nowait()
-                print(f"[DISPATCH] got voice cmd: {voice_cmd}")
-                publish_gesture(voice_cmd, "voice")
-                await asyncio.sleep(0)
-                continue
-            except asyncio.QueueEmpty:
-                pass
-
-            try:
-                gesture_cmd = await asyncio.wait_for(gesture_cmd_queue.get(), timeout=0.25)
-                print(f"[DISPATCH] got gesture cmd: {gesture_cmd}")
-                publish_gesture(gesture_cmd, "gesture")
-            except asyncio.TimeoutError:
-                await asyncio.sleep(0.05)
-
-        except Exception as e:
-            print("[DISPATCH] CRASHED:", e)
-            traceback.print_exc()
-            await asyncio.sleep(1.0)  # keep it alive so we can see repeated failures
-
-# ============================================================================
-# IMU GESTURE DETECTION (based on your original IMU code)
-# ============================================================================
-# IMU settings loaded from config.py
-IMU_MAC = IMU_MAC_ADDRESS
-
-MODE_IDLE = "IDLE"
-MODE_COMMAND = "COMMAND"
-imu_mode = MODE_IDLE
-imu_connected = False
-
-# ---------- Wake / Cancel: DOUBLE FLICK ----------
-FLICK_GMAG_THR_DPS = 750.0
-FLICK_REFRACTORY_S = 0.20
-FLICK_PEAK_WINDOW_S = 0.25
-
-DOUBLE_FLICK_REQUIRED = 2
-DOUBLE_FLICK_MAX_SPAN_S = 0.85
-
-# ---------- Command timing ----------
-COMMAND_TIMEOUT_S = 5.0
-COMMAND_READY_DELAY_S = 1.0
-REARM_READY_DELAY_S = 0.8
-POST_COMMAND_COOLDOWN_S = 0.40
-REARM_IDLE_S = 0.25
-
-# ---------- History ----------
-GESTURE_WINDOW_S = 0.60
-HIST_KEEP_S = 2.0
-
-# ---------- Twist detection ----------
-TWIST_GY_THR_DPS = 180.0
-TWIST_RIGHT_IS_POSITIVE_GY = True
-
-# ---------- Swipe detection ----------
-SWIPE_DAZ_THR_G = 0.55
-SWIPE_TWIST_REJECT_GY_DPS = 260.0
-SWIPE_UP_IS_POSITIVE_DAZ = True
-
-DEBUG_COMMAND = False
-
-
-# ---------------- BLE packet parsing ----------------
-def parse_wt901_packets(buf: bytearray):
-    out = []
-    i = 0
-    while i + 20 <= len(buf):
-        if buf[i] != 0x55:
-            i += 1
-            continue
-        out.append(bytes(buf[i:i + 20]))
-        i += 20
-    del buf[:i]
-    return out
-
-
-def decode_frame(frame: bytes):
-    if len(frame) != 20 or frame[0] != 0x55:
-        return None
-    if frame[1] == 0x61:
-        ax, ay, az, gx, gy, gz, roll, pitch, yaw = struct.unpack_from("<9h", frame, 2)
-        accel_g = (ax / 32768.0 * 16.0, ay / 32768.0 * 16.0, az / 32768.0 * 16.0)
-        gyro_dps = (gx / 32768.0 * 2000.0, gy / 32768.0 * 2000.0, gz / 32768.0 * 2000.0)
-        angle_deg = (roll / 32768.0 * 180.0, pitch / 32768.0 * 180.0, yaw / 32768.0 * 180.0)
-        return accel_g, gyro_dps, angle_deg
-    return None
-
-
-def mag3(x, y, z):
-    return math.sqrt(x * x + y * y + z * z)
-
-
-# ---------------- Gesture Engine ----------------
-class GestureEngine:
-    """
-    State machine:
-      - IDLE: waits for DOUBLE FLICK to arm
-      - COMMAND: after delay, accepts ONE gesture (twist/swipe), then returns to IDLE
-      - Re-arm: short idle and automatically re-enters COMMAND mode
-    """
-    def __init__(self):
-        self.mode = MODE_IDLE
-
-        # history: (t, ax, ay, az, gx, gy, gz)
-        self.hist = deque()
-
-        # flick bookkeeping
-        self.flick_times = deque()
-        self.last_flick_t = 0.0
-
-        # command bookkeeping
-        self.cmd_start_t = 0.0
-        self.last_cmd_t = 0.0
-        self.ready_announced = False
-        self.entered_via_rearm = False
-
-        # command-mode baseline for az deltas
-        self.az0 = None
-        self.az0_accum = 0.0
-        self.az0_n = 0
-        self.az0_target_n = 6
-
-        # re-arm support
-        self.pending_rearm = False
-        self.rearm_at_t = 0.0
-
-    def clear_history(self):
-        self.hist.clear()
-
-    def _reset_command_baselines(self):
-        self.az0 = None
-        self.az0_accum = 0.0
-        self.az0_n = 0
-        self.ready_announced = False
-
-    def _enter_command_mode(self, via_rearm: bool = False):
-        self.mode = MODE_COMMAND
-        self.cmd_start_t = time.time()
-        self.entered_via_rearm = via_rearm
-        self.clear_history()
-        self._reset_command_baselines()
-
-    def push(self, ax, ay, az, gx, gy, gz):
-        now = time.time()
-        self.hist.append((now, ax, ay, az, gx, gy, gz))
-        while self.hist and (now - self.hist[0][0]) > HIST_KEEP_S:
-            self.hist.popleft()
-
-    def _window(self, window_s):
-        now = time.time()
-        return [s for s in self.hist if (now - s[0]) <= window_s]
-
-    def _peak_value(self, window_s, val_fn):
-        w = self._window(window_s)
-        if not w:
-            return None
-        return max(val_fn(s) for s in w)
-
-    def _peak_sample(self, window_s, key_fn):
-        w = self._window(window_s)
-        if not w:
-            return None
-        return max(w, key=key_fn)
-
-    # ---- flick event ----
-    def _detect_flick_event(self):
-        now = time.time()
-        if now - self.last_flick_t < FLICK_REFRACTORY_S:
-            return False
-
-        gmag_peak = self._peak_value(
-            FLICK_PEAK_WINDOW_S,
-            lambda s: mag3(s[4], s[5], s[6])
-        )
-        if gmag_peak is not None and gmag_peak >= FLICK_GMAG_THR_DPS:
-            self.last_flick_t = now
-            return True
-        return False
-
-    # ---- double flick detection ----
-    def _detect_double_flick(self):
-        now = time.time()
-        if not self._detect_flick_event():
-            return False
-
-        self.flick_times.append(now)
-
-        # keep only within span
-        while self.flick_times and (now - self.flick_times[0]) > DOUBLE_FLICK_MAX_SPAN_S:
-            self.flick_times.popleft()
-
-        if len(self.flick_times) >= DOUBLE_FLICK_REQUIRED:
-            self.flick_times.clear()
-            return True
-        return False
-
-    # ---- gestures ----
-    def _detect_twist(self):
-        s = self._peak_sample(GESTURE_WINDOW_S, key_fn=lambda x: abs(x[5]))  # gy
-        if not s:
-            return None
-        gy = s[5]
-        if abs(gy) >= TWIST_GY_THR_DPS:
-            if TWIST_RIGHT_IS_POSITIVE_GY:
-                return "NEXT_TRACK" if gy > 0 else "PREV_TRACK"
-            else:
-                return "NEXT_TRACK" if gy < 0 else "PREV_TRACK"
-        return None
-
-    def _update_command_baseline(self):
-        if self.az0 is not None:
-            return True
-        if not self.hist:
-            return False
-        az = self.hist[-1][3]
-        self.az0_accum += az
-        self.az0_n += 1
-        if self.az0_n >= self.az0_target_n:
-            self.az0 = self.az0_accum / self.az0_n
-            return True
-        return False
-
-    def _detect_swipe_by_daz(self):
-        if self.az0 is None:
-            return None
-
-        # reject swipe if twist is too strong
-        gy_peak = self._peak_value(GESTURE_WINDOW_S, lambda s: abs(s[5]))
-        if gy_peak is not None and gy_peak > SWIPE_TWIST_REJECT_GY_DPS:
-            return None
-
-        w = self._window(GESTURE_WINDOW_S)
-        if not w:
-            return None
-
-        daz_vals = [(s[3] - self.az0) for s in w]
-        daz_peak = max(daz_vals)
-        daz_trough = min(daz_vals)
-        daz_best = daz_peak if abs(daz_peak) >= abs(daz_trough) else daz_trough
-
-        if DEBUG_COMMAND:
-            print(f"[dbg] az0={self.az0:+.3f} daz_best={daz_best:+.3f} | gy_peak={gy_peak if gy_peak is not None else -1:+.1f}")
-
-        if abs(daz_best) >= SWIPE_DAZ_THR_G:
-            if SWIPE_UP_IS_POSITIVE_DAZ:
-                return "PAUSE" if daz_best > 0 else "PLAY"
-            else:
-                return "PAUSE" if daz_best < 0 else "PLAY"
-        return None
-
-    async def step(self):
-        now = time.time()
-
-        # Handle pending re-arm
-        if self.pending_rearm and now >= self.rearm_at_t:
-            self.pending_rearm = False
-            self._enter_command_mode(via_rearm=True)
-            return "REENTER_COMMAND_MODE"
-
-        # -------- IDLE --------
-        if self.mode == MODE_IDLE:
-            if self._detect_double_flick():
-                self._enter_command_mode(via_rearm=False)
-                return "ENTER_COMMAND_MODE"
-            return None
-
-        # -------- COMMAND --------
-        # double flick cancels back to idle
-        if self._detect_double_flick():
-            self.mode = MODE_IDLE
-            self.clear_history()
-            return "CANCEL_TO_IDLE"
-
-        elapsed = now - self.cmd_start_t
-        ready_delay = REARM_READY_DELAY_S if self.entered_via_rearm else COMMAND_READY_DELAY_S
-
-        # ready delay
-        if elapsed < ready_delay:
-            return None
-
-        if not self.ready_announced:
-            self.ready_announced = True
-            return "READY_FOR_GESTURE"
-
-        # timeout
-        if elapsed > COMMAND_TIMEOUT_S:
-            self.mode = MODE_IDLE
-            self.clear_history()
-            return "COMMAND_TIMEOUT"
-
-        if now - self.last_cmd_t < POST_COMMAND_COOLDOWN_S:
-            return None
-
-        if not self._update_command_baseline():
-            return None
-
-        # detect gesture
-        g = self._detect_twist()
-        if g:
-            self.last_cmd_t = now
-            self.mode = MODE_IDLE
-            self.clear_history()
-            self.pending_rearm = True
-            self.rearm_at_t = now + REARM_IDLE_S
-            return g
-
-        g = self._detect_swipe_by_daz()
-        if g:
-            self.last_cmd_t = now
-            self.mode = MODE_IDLE
-            self.clear_history()
-            self.pending_rearm = True
-            self.rearm_at_t = now + REARM_IDLE_S
-            return g
-
-        return None
-
-
-# ---------------- BLE runner ----------------
-async def imu_run(client: "BleakClient", notify_uuid: str, label: str):
-    """
-    Reads WT901 packets from notify UUID, decodes accel/gyro,
-    feeds the GestureEngine, and queues recognized gestures.
-    """
-    global imu_mode
-    sample_queue: asyncio.Queue = asyncio.Queue(maxsize=800)
-    buf = bytearray()
-    engine = GestureEngine()
-    last_mode = engine.mode
-    imu_mode = engine.mode
-
-    def handler(_sender, data: bytearray):
-        buf.extend(data)
-        for frame in parse_wt901_packets(buf):
-            decoded = decode_frame(frame)
-            if decoded:
-                try:
-                    sample_queue.put_nowait(decoded)
-                except asyncio.QueueFull:
-                    pass
-
-    print(f"\n[{label}] Subscribing to notifications on {notify_uuid} ...")
-    await client.start_notify(notify_uuid, handler)
-    await asyncio.sleep(1.0)
-
-    print("\nIDLE: DOUBLE FLICK to arm command mode.")
-    print("COMMAND: one of {NEXT_TRACK, PREV_TRACK, PAUSE, PLAY}.")
-    print("COMMAND: DOUBLE FLICK again cancels.\n")
-
-    try:
-        while True:
-            (accel_g, gyro_dps, _angle_deg) = await sample_queue.get()
-            (ax, ay, az) = accel_g
-            (gx, gy, gz) = gyro_dps
-
-            engine.push(ax, ay, az, gx, gy, gz)
-            evt = await engine.step()
-
-            if engine.mode != last_mode:
-                last_mode = engine.mode
-                imu_mode = engine.mode
-                publish_status("online")
-
-            # If gestures disabled, keep engine running but skip publishes
-            if evt and not gesture_enabled:
-                continue
-
-            if evt == "ENTER_COMMAND_MODE":
-                print(f"\n>>> COMMAND MODE ARMED <<<")
-                print(f"    Waiting {COMMAND_READY_DELAY_S:.2f}s... then do ONE gesture.")
-            elif evt == "REENTER_COMMAND_MODE":
-                print(f"\n>>> COMMAND MODE RE-ARMED <<<")
-                print(f"    Waiting {REARM_READY_DELAY_S:.2f}s... then do ONE gesture.")
-            elif evt == "READY_FOR_GESTURE":
-                print("\n>>> READY: do your gesture now! <<<")
-            elif evt == "CANCEL_TO_IDLE":
-                print("\n>>> CANCELLED -> Back to IDLE mode <<<")
-            elif evt == "COMMAND_TIMEOUT":
-                print("\n>>> TIMEOUT -> Back to IDLE mode <<<")
-            elif evt in ("NEXT_TRACK", "PREV_TRACK", "PAUSE", "PLAY"):
-                print(f"\nGESTURE: {evt}")
-                print(">>> Back to IDLE mode <<<")
-                await gesture_cmd_queue.put(evt)
-
-    finally:
-        try:
-            await client.stop_notify(notify_uuid)
-        except Exception:
-            pass
-
-
-async def run_gesture_detection():
-    """Connects to IMU and runs primary notify UUID, then fallback on error."""
-    global imu_connected
-    if not BLEAK_AVAILABLE:
-        print("[IMU] Bleak not installed; gesture detection disabled")
-        imu_connected = False
-        publish_status("online")
-        return
-
-    print(f"[IMU] Connecting to {IMU_MAC}...")
-    client = None
-    try:
-        client = BleakClient(IMU_MAC)
-        await client.connect()
-        print("[IMU] Connected.")
-        imu_connected = True
-        publish_status("online")
-
-        try:
-            await imu_run(client, CHAR_NOTIFY_PRIMARY, "PRIMARY")
-        except Exception as e:
-            print(f"[PRIMARY] Error: {e}")
-
-        print("\nSwitching to fallback notify characteristic...\n")
-        await imu_run(client, CHAR_NOTIFY_FALLBACK, "FALLBACK")
-
-    except Exception as e:
-        print(f"[IMU] Connection error: {e}")
-    finally:
-        imu_connected = False
-        publish_status("online")
-        if client is not None:
-            try:
-                await client.disconnect()
-            except Exception:
-                pass
-
-
-# ============================================================================
-# VOICE COMMAND DETECTION (runs in a thread)
-# ============================================================================
-def run_voice_and_fft(loop: asyncio.AbstractEventLoop):
-    import speech_recognition as sr
-
-    r = sr.Recognizer()
-
-    RATE = 16000
-    CHUNK = 1024
-    FFT_N = 1024
-    ALPHA = 0.18
-    GATE = 0.05
-    DECAY = 0.985
-
-    BASS = (30, 180)
-    MIDS = (180, 1500)
-    HIGHS = (1500, 6000)
-
-    window = np.hanning(FFT_N).astype(np.float32)
-
-    sb = sm = sh = 0.0
-    pb = pm = ph = 1e-6
-
-    pa = pyaudio.PyAudio()
-
-    # pick the same input device pi1_agent already prefers
-    mic_index = vc.DEVICE_INDEX
-
-    # open ONE shared mic stream
-    try:
-        stream = pa.open(
-            format=pyaudio.paInt16,
-            channels=1,
-            rate=RATE,
-            input=True,
-            input_device_index=mic_index,
-            frames_per_buffer=CHUNK,
-        )
-    except Exception as e:
-        print(f"[VOICE+FFT] Could not open mic (device_index={mic_index}): {e}")
-        return
-
-    print(f"[VOICE+FFT] Mic opened once (device_index={mic_index})")
-
-    # simple speech buffer (VAD-ish)
-    speech_frames = []
-    speech_active = False
-    last_voice_time = 0.0
-
-    def clamp01(x):
-        return 0.0 if x < 0.0 else (1.0 if x > 1.0 else x)
-
-    def band_mean(freqs, mags, lo, hi):
-        idx = np.where((freqs >= lo) & (freqs < hi))[0]
-        if idx.size == 0:
-            return 0.0
-        return float(np.mean(mags[idx]))
-
-    mic_was_stopped = False
-
-    try:
-        while True:
-            if not voice_enabled:
-                if not mic_was_stopped:
-                    try:
-                        stream.stop_stream()
-                    except Exception:
-                        pass
-                    mic_was_stopped = True
-                    speech_active = False
-                    speech_frames = []
-                    print("[VOICE+FFT] Mic stream stopped (voice disabled)")
-                time.sleep(0.1)
-                continue
-
-            if mic_was_stopped:
-                try:
-                    stream.start_stream()
-                except Exception:
-                    pass
-                mic_was_stopped = False
-                print("[VOICE+FFT] Mic stream resumed (voice enabled)")
-
-            data = stream.read(CHUNK, exception_on_overflow=False)
-            samples = np.frombuffer(data, dtype=np.int16).astype(np.float32)
-
-            # ---------- FFT levels (every chunk) ----------
-            x = (samples[:FFT_N] * window) if len(samples) >= FFT_N else (np.pad(samples, (0, FFT_N-len(samples))) * window)
-            mags = np.abs(np.fft.rfft(x))
-            freqs = np.fft.rfftfreq(FFT_N, d=1.0 / RATE)
-
-            rb = band_mean(freqs, mags, BASS[0], BASS[1])
-            rm = band_mean(freqs, mags, MIDS[0], MIDS[1])
-            rh = band_mean(freqs, mags, HIGHS[0], HIGHS[1])
-
-            pb = max(rb, pb * DECAY)
-            pm = max(rm, pm * DECAY)
-            ph = max(rh, ph * DECAY)
-
-            nb = clamp01(rb / (pb + 1e-6))
-            nm = clamp01(rm / (pm + 1e-6))
-            nh = clamp01(rh / (ph + 1e-6))
-
-            nb = 0.0 if nb < GATE else nb
-            nm = 0.0 if nm < GATE else nm
-            nh = 0.0 if nh < GATE else nh
-
-            sb = (1 - ALPHA) * sb + ALPHA * nb
-            sm = (1 - ALPHA) * sm + ALPHA * nm
-            sh = (1 - ALPHA) * sh + ALPHA * nh
-
-            # publish FFT levels for light_dance.py
-            if mqtt_client and mqtt_client.is_connected():
-                mqtt_client.publish(
-                    "home/pi1/audio_fft",
-                    json.dumps({"bass": sb, "mids": sm, "highs": sh, "ts": time.time()})
-                )
-
-            # ---------- crude voice activity detection ----------
-            rms = float(np.sqrt(np.mean(samples * samples)))
-            now = time.time()
-
-            if rms > 900:  # tune if needed
-                if not speech_active:
-                    speech_frames = []
-                    speech_active = True
-                speech_frames.append(data)
-                last_voice_time = now
-            else:
-                if speech_active:
-                    # end speech after 0.5s quiet
-                    if now - last_voice_time > 0.5:
-                        speech_active = False
-
-                        raw = b"".join(speech_frames)
-                        speech_frames = []
-
-                        audio = sr.AudioData(raw, RATE, 2)
-                        try:
-                            text = r.recognize_google(audio, language="en-US")
-                            print(f"[VOICE] Heard: {text}")
-                            cmd = map_voice_command_strict(text)
-                            if cmd:
-                                print(f"[VOICE] Recognized command: {cmd}")
-                                loop.call_soon_threadsafe(voice_cmd_queue.put_nowait, cmd)
-                        except sr.UnknownValueError:
-                            pass
-                        except sr.RequestError as e:
-                            print(f"[VOICE] Google STT error: {e}")
-
-    except Exception as e:
-        print(f"[VOICE+FFT] Error: {e}")
-
-    finally:
-        try:
-            stream.stop_stream()
-            stream.close()
-        except Exception:
-            pass
-        try:
-            pa.terminate()
-        except Exception:
-            pass
-
-
-def run_voice_detection(loop: asyncio.AbstractEventLoop):
-    def get_input_devices():
-        """Return list of (index, name, max_inputs) using PyAudio if possible."""
-        try:
-            import pyaudio
-
-            pa = pyaudio.PyAudio()
-            devices = []
-            try:
-                count = pa.get_device_count()
-                for i in range(count):
-                    info = pa.get_device_info_by_index(i)
-                    devices.append((i, info.get("name", "?"), info.get("maxInputChannels", 0)))
-            finally:
-                pa.terminate()
-            return devices
-        except Exception:
-            return None
-
-    def list_microphones():
-        """Print available input devices with indexes to help select DEVICE_INDEX."""
-        print("[VOICE] Listing input devices...")
-        devices = get_input_devices()
-        if devices:
-            for i, name, inputs in devices:
-                print(f"  {i}: {name} inputs={inputs}")
-            return
-
-        # Fallback if PyAudio path fails
-        try:
-            import speech_recognition as sr
-
-            names = sr.Microphone.list_microphone_names()
-            for i, name in enumerate(names):
-                print(f"  {i}: {name}")
-        except Exception as e2:
-            print(f"[VOICE] Could not list microphones: {e2}")
-
-    try:
-        import speech_recognition as sr
-    except ImportError:
-        print("[VOICE] SpeechRecognition not installed, voice detection disabled")
-        return
-
-    r = sr.Recognizer()
-
-    # Make behavior consistent (avoid drift / long phrases)
-    r.dynamic_energy_threshold = False
-    r.energy_threshold = int(os.environ.get("VOICE_ENERGY", "700"))
-    r.pause_threshold = float(os.environ.get("VOICE_PAUSE_THRESHOLD", "0.35"))
-    r.non_speaking_duration = float(os.environ.get("VOICE_NON_SPEAKING_DURATION", "0.20"))
-
-    # Choose a microphone: prefer first device with inputs>0; otherwise fallback
-    mic_index = vc.DEVICE_INDEX
-
-    # --- FORCE VOICE_DEVICE override if provided ---
-    voice_dev_env = os.environ.get("VOICE_DEVICE")
-    if voice_dev_env is not None and str(voice_dev_env).strip() != "":
-        try:
-            mic_index = int(voice_dev_env)
-            print(f"[VOICE] Using VOICE_DEVICE env override: {mic_index}")
-        except ValueError:
-            print(f"[VOICE] Invalid VOICE_DEVICE='{voice_dev_env}', ignoring")
-    # ------------------------------------------------
-    devices_info = get_input_devices()
-    chosen_name = None
-
-    if devices_info:
-        input_devices = [(i, name, ins) for (i, name, ins) in devices_info if ins and ins > 0]
-        all_devices = devices_info
-        list_microphones()
-
-        def valid(idx):
-            return 0 <= idx < len(all_devices) and all_devices[idx][2] and all_devices[idx][2] > 0
-
-        if not valid(mic_index):
-            if input_devices:
-                mic_index = input_devices[0][0]
-                print(f"[VOICE] Auto-selecting first input-capable device: {mic_index} -> {input_devices[0][1]}")
-            else:
-                print("[VOICE] No input-capable devices found")
-                return
-        chosen_name = all_devices[mic_index][1]
-    else:
-        # Fallback to SpeechRecognition list (names only)
-        try:
-            devices = sr.Microphone.list_microphone_names()
-            if not devices:
-                print("[VOICE] No microphones found")
-                return
-            list_microphones()
-            if mic_index < 0 or mic_index >= len(devices):
-                mic_index = 0
-                print(f"[VOICE] Auto-selecting DEVICE_INDEX={mic_index} -> {devices[mic_index]}")
-            chosen_name = devices[mic_index]
-        except Exception as e:
-            print(f"[VOICE] Could not validate microphone list: {e}")
-            mic_index = vc.DEVICE_INDEX
-
-    if chosen_name:
-        print(f"[VOICE] Using DEVICE_INDEX={mic_index} -> {chosen_name}")
-
-    try:
-        with sr.Microphone(
-            device_index=mic_index,
-            sample_rate=vc.SAMPLE_RATE,
-            chunk_size=vc.CHUNK,
-        ) as source:
-            print(f"[VOICE] Microphone opened (device={mic_index}, rate={vc.SAMPLE_RATE}, chunk={vc.CHUNK})")
-            if os.environ.get("VOICE_CALIBRATE", "0") == "1":
-                print("[VOICE] Calibrating for ambient noise (1s)...")
-                try:
-                    r.adjust_for_ambient_noise(source, duration=1.0)
-                except Exception as e:
-                    print(f"[VOICE] Calibration error: {e}")
-                    return
-            print("[VOICE] Voice detection active; listening for commands")
-
-            # Track if we were disabled so we can stop the mic
-            was_disabled = False
-            pa_stream = source.stream
-
-            while True:
-                if not voice_enabled:
-                    if not was_disabled:
-                        was_disabled = True
-                        # Stop the underlying PyAudio stream so mic takes no input
-                        try:
-                            if pa_stream and pa_stream.is_active():
-                                pa_stream.stop_stream()
-                                print("[VOICE] Mic stream stopped (voice disabled)")
-                        except Exception:
-                            pass
-                    time.sleep(0.1)
-                    continue
-
-                # If just re-enabled, restart the stream and flush stale audio
-                if was_disabled:
-                    was_disabled = False
-                    try:
-                        if pa_stream and not pa_stream.is_active():
-                            pa_stream.start_stream()
-                            print("[VOICE] Mic stream resumed (voice enabled)")
-                    except Exception:
-                        pass
-                    
-                    # Reset Vosk recognizer state to clear any partial results
-                    if hasattr(vc, "_rec") and vc._rec is not None:
-                        try:
-                            vc._rec.Reset()
-                        except:
-                            pass
-                    
-                    # Consume any stale audio in the mic buffer (quick non-blocking read)
-                    try:
-                        r.listen(source, timeout=0.1, phrase_time_limit=0.1)
-                    except:
-                        pass
-                    
-                    print("[VOICE] Ready for fresh commands")
-                    continue
-
-                try:
-                    print("[VOICE] Listening...")
-
-                    voice_timeout = float(os.environ.get("VOICE_TIMEOUT", "1.0"))
-                    phrase_time = float(os.environ.get("VOICE_PHRASE_TIME", "1.2"))
-                    audio = r.listen(source, timeout=voice_timeout, phrase_time_limit=phrase_time)
-
-                    final_text = None
-                    partial_text = None
-                    final_from_partial = False
-
-                    if hasattr(vc, "recognize_offline_with_partial"):
-                        final_text, partial_text = vc.recognize_offline_with_partial(audio)
-                    else:
-                        final_text = vc.recognize_offline(audio)
-
-                    if partial_text and os.environ.get("VOICE_PRINT_PARTIALS", "1") == "1":
-                        print(f"[VOICE] Partial: {partial_text}")
-
-                    # Agent-level partial processing: trigger IMMEDIATELY on first valid command
-                    if not hasattr(run_voice_detection, "_last_cmd"):
-                        run_voice_detection._last_cmd = None
-                        run_voice_detection._last_cmd_t = 0.0
-
-                    # NEW APPROACH: Extract first valid command from partial immediately
-                    if not final_text and partial_text:
-                        # Check if partial contains any command word
-                        cmd_from_partial = map_voice_command_strict(partial_text)
-                        if cmd_from_partial and cmd_from_partial not in ("PREV_TRACK"):
-                            # We found a valid command in the partial!
-                            # Use it immediately without waiting for stability
-                            final_text = partial_text
-                            final_from_partial = True
-                            print(f"[VOICE] Triggering on partial: {partial_text}")
-
-                    if not final_text:
-                        print("[VOICE] Ready for next command")
-                        continue
-
-                    text = str(final_text).strip().lower()
-                    if not text:
-                        print("[VOICE] Ready for next command")
-                        continue
-
-                    print(f"[VOICE] Heard (offline): {text}")
-
-                    # CRITICAL: Reset Vosk after EVERY final to prevent stacking
-                    if hasattr(vc, "_rec") and vc._rec is not None:
-                        try:
-                            vc._rec.Reset()
-                        except Exception:
-                            pass
-
-                    cmd = map_voice_command_strict(text)
-                    if cmd:
-                        now = time.time()
-                        cooldown = float(os.environ.get("VOICE_CMD_COOLDOWN", "0.50"))
-                        if run_voice_detection._last_cmd == cmd and (now - run_voice_detection._last_cmd_t) < cooldown:
-                            print("[VOICE] Duplicate suppressed")
-                            print("[VOICE] Ready for next command")
-                            continue
-
-                        run_voice_detection._last_cmd = cmd
-                        run_voice_detection._last_cmd_t = now
-
-                        print(f"[VOICE] Recognized command: {cmd}")
-                        loop.call_soon_threadsafe(voice_cmd_queue.put_nowait, cmd)
-                        
-                        # CRITICAL: Reset Vosk AGAIN immediately after publishing command
-                        if hasattr(vc, "_rec") and vc._rec is not None:
-                            try:
-                                vc._rec.Reset()
-                            except Exception:
-                                pass
-
-                    print("[VOICE] Ready for next command")
-
-                except sr.WaitTimeoutError:
-                    continue
-                except Exception as e:
-                    print(f"[VOICE] Listen/recognition error: {e}")
-                    time.sleep(0.2)
-
-    except Exception as e:
-        print(f"[VOICE] Microphone error: {e}")
-        print("[VOICE] Voice detection disabled")
-
-
-# ============================================================================
-# MAIN ENTRY POINT
-# ============================================================================
-async def main():
-    global mqtt_client
-
-    print("=" * 60)
-    print("Pi 1 Agent - Starting")
-    print("=" * 60)
-
-    # ---- MQTT setup ----
-    mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="pi1_agent")
-    mqtt_client.on_connect = on_mqtt_connect
-    mqtt_client.on_message = on_mqtt_message
-    mqtt_client.on_disconnect = on_mqtt_disconnect
-
-    mqtt_client.will_set(
-        TOPIC_PI1_STATUS,
-        json.dumps({"status": "offline", "timestamp": time.time(), "device": "pi1"}),
-    )
-
-    try:
-        print(f"[MQTT] Connecting to {MQTT_BROKER}:{MQTT_PORT}...")
-        mqtt_client.connect(MQTT_BROKER, MQTT_PORT, MQTT_KEEPALIVE)
-        mqtt_client.loop_start()
-    except Exception as e:
-        print(f"[MQTT] Failed to connect: {e}")
-        print("[MQTT] Running in offline mode")
-
-    loop = asyncio.get_running_loop()
-    global voice_cmd_queue, gesture_cmd_queue
-    voice_cmd_queue = asyncio.Queue()
-    gesture_cmd_queue = asyncio.Queue()
-    print("[DISPATCH] queues created on running loop")
-    
-    # ---- Voice thread (optional) ----
-    if VOICE_ENABLED_AT_START:
-        voice_thread = threading.Thread(target=run_voice_detection, args=(loop,), daemon=True)
-        voice_thread.start()
-    else:
-        print("[VOICE] Skipping voice detection (ENABLE_VOICE=0)")
-
-    # ---- Dispatcher (voice priority) ----
-    dispatcher_task = asyncio.create_task(dispatch_commands())
-
-    try:
-        while True:
-            global force_imu_reconnect
-            
-            # If gestures are disabled, just sleep and check again
-            if not gesture_enabled and not force_imu_reconnect:
-                await asyncio.sleep(1.0)
-                continue
-            
-            # Clear reconnect flag and run detection
             if force_imu_reconnect:
                 print("[IMU] Reconnecting due to toggle...")
                 force_imu_reconnect = False
