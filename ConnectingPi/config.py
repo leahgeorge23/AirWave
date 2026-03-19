@@ -154,3 +154,43 @@ SPOTIFY_REFRESH_TOKEN = "AQAJJO-ftiuUKtHMfmEef_JrSvt4w_2iQ3oa94Qscv0TSm0dT70AnfX
 SPOTIFY_CLIENT_ID     = "ccd684a80e494761a074ad250bfd3e9d"
 SPOTIFY_CLIENT_SECRET = "2efb0a500cd74fc294cefa026a4bf374"
 SPOTIFY_REFRESH_TOKEN = "AQALuQSwu9o2hcrmpMhWAMJ_0mcLvfPVNMqhdsV1F0zljeG118iw-R-PM3ByIPHvRE67_938A9nssj3Qw92Qh_4sbBBt2AIZYe-1eDyTRrI7FePk3-3GJi-q4LzYvFaSoDk"
+
+
+# ============================================================
+# SPOTIFY API CREDENTIALS (added by launcher)
+# ============================================================
+SPOTIFY_CLIENT_ID     = "ccd684a80e494761a074ad250bfd3e9d"
+SPOTIFY_CLIENT_SECRET = "2efb0a500cd74fc294cefa026a4bf374"
+SPOTIFY_REFRESH_TOKEN = "AQAPUF8GYClUZVyxnGH1cPcdYuv2VovRMZKocyLnVmtN6nIVRqgdujWDgmHdytKc8qM9uNn4op6Zcy9q0n8gPLJW9vX7jCJouERp10e2-vk_6JIutQax_KLuy-jfzQw3AdY"
+
+
+# ============================================================
+# SPOTIFY API CREDENTIALS (added by launcher)
+# ============================================================
+SPOTIFY_CLIENT_ID     = "ccd684a80e494761a074ad250bfd3e9d"
+SPOTIFY_CLIENT_SECRET = "4aba9f25c3cd451a9c883fcd6157156a"
+SPOTIFY_REFRESH_TOKEN = "AQAORtomnAI860xodY9BjvJUDotoOsLAtL-rEj6-5U2EHVEz2de4NnPssQxDb9qwEjXzRApuvNLmIV6MGbfuERflpuEN8Ui-k7sc11z8aIVdvlYtyH1eAGUkkGeyImXEhu8"
+
+
+# ============================================================
+# SPOTIFY API CREDENTIALS (added by launcher)
+# ============================================================
+SPOTIFY_CLIENT_ID     = "ccd684a80e494761a074ad250bfd3e9d"
+SPOTIFY_CLIENT_SECRET = "4aba9f25c3cd451a9c883fcd6157156a"
+SPOTIFY_REFRESH_TOKEN = "AQD7zjyXgfy2Cz8Npiys6qx8fQKsuAF216UQsSLbqwiYLrrwRVaVZuxv_8NScr7wmHie3x2EMS_sM6FrGPtBrGmgohUmHlS6lXMeCZqes9zwVfV2olHCrUGoifpOxFoSjO4"
+
+
+# ============================================================
+# SPOTIFY API CREDENTIALS (added by launcher)
+# ============================================================
+SPOTIFY_CLIENT_ID     = "ccd684a80e494761a074ad250bfd3e9d"
+SPOTIFY_CLIENT_SECRET = "4aba9f25c3cd451a9c883fcd6157156a"
+SPOTIFY_REFRESH_TOKEN = "AQBaoJsbSLwSbwJZJ7rjrltKqRmNXSk62TQSUv4eK7wkRcJ3d8nmsfwRjwdsqZimIe64vR4dDJq93bykPsWun8ahIBtCc8hHwlR2ZskkpuCI5qMJXhapSwxfwolyyxT-k0o"
+
+
+# ============================================================
+# SPOTIFY API CREDENTIALS (added by launcher)
+# ============================================================
+SPOTIFY_CLIENT_ID     = "ccd684a80e494761a074ad250bfd3e9d"
+SPOTIFY_CLIENT_SECRET = "4aba9f25c3cd451a9c883fcd6157156a"
+SPOTIFY_REFRESH_TOKEN = "AQDlKO0DF4D5u2wlHaAwpQUye_3bOt5ImJdmzC6vBK0AXmfkzfFe4yOxTmXPPIEJirYEmrcFRlu3zxeX5p3Hbtu4ct9l_i9_dF-jiuXjHmTq3Y5hg0CLhptPNd4I9P8Oreo"

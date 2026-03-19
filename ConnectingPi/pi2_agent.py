@@ -59,7 +59,7 @@ ref_area = None
 recalibrate_requested = False
 
 # Global state for dashboard
-current_volume = 100
+current_volume = 80
 current_distance = 5.0
 current_pan = 0.0
 current_tilt = 0.0
