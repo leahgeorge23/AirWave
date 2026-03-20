@@ -1,4 +1,4 @@
-# Team 6 Project Overview
+# AirWave Project Overview
 
 This project is an interactive Raspberry Pi system that combines:
 
@@ -22,11 +22,10 @@ This project is an interactive Raspberry Pi system that combines:
 
 ## Quick Start
 
-1. Configure device and broker settings in `ConnectingPi/config.py`.
-2. Make sure required packages/tools are installed on the Raspberry Pi(s).
-3. Run the launcher to start the system:
+1. Run the launcher to start the system:
    - `python3 ConnectingPi/launcher.py`
-
+2. See user manual for any issues
+   
 ## Notes
 
 - This project depends on Raspberry Pi hardware, camera access, Bluetooth audio, and an MQTT broker.
